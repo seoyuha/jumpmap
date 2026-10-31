@@ -1847,27 +1847,28 @@ function animateWorld(C, M, t, dt) {
   else { animateWorldHD(C, M, t, dt); const U = scene && scene.userData; if (U && U.sky) { U.sky.position.copy(camera.position); U.stars.position.copy(camera.position); } }
 }
 
+// 34차: 올려 주신 패키지의 블록형 3D 캐릭터 16종 (이름·색이 캐릭터 구분값)
 const AVATARS = [
-  { name: "파란 후드 소년", body: "#2f6fdc" },
-  { name: "분홍 후드 소녀", body: "#ff7fb0" },
-  { name: "초록 공룡 후드", body: "#3fbf55" },
-  { name: "노란 리본 소녀", body: "#ffc93c" },
-  { name: "하얀 과학자", body: "#7cc4f5" },
-  { name: "보라 고양이", body: "#8b5cf6" },
-  { name: "빨간 모자", body: "#e23b3b" },
-  { name: "탐험가 소녀", body: "#b07a4f" },
-  { name: "우주비행사", body: "#4a8fe8" },
-  { name: "토끼 후드", body: "#ffb3cf" },
-  { name: "판다 후드", body: "#4b4f5c" },
-  { name: "마법사", body: "#6a3fd0" },
-  { name: "기사", body: "#d4a72c" },
-  { name: "닌자", body: "#2a2a35" },
-  { name: "로봇", body: "#3ec8f0" },
-  { name: "체육소년", body: "#f05a28" },
+  { name: "빨강 탐험가", body: "#ff6b6b" },
+  { name: "주황 모험가", body: "#ffa94d" },
+  { name: "노랑 탐험가", body: "#ffd43b" },
+  { name: "초록 공룡", body: "#69db7c" },
+  { name: "민트 요정", body: "#38d9a9" },
+  { name: "파랑 히어로", body: "#4dabf7" },
+  { name: "우주 탐험가", body: "#748ffc" },
+  { name: "보라 마법사", body: "#da77f2" },
+  { name: "분홍 고양이", body: "#f783ac" },
+  { name: "회색 로봇", body: "#adb5bd" },
+  { name: "하늘 수호자", body: "#74c0fc" },
+  { name: "라임 개구리", body: "#a9e34b" },
+  { name: "산호 토끼", body: "#ff8787" },
+  { name: "남색 닌자", body: "#364fc7" },
+  { name: "금빛 발명가", body: "#fcc419" },
+  { name: "자주 왕관", body: "#be4bdb" },
 ];
 const AVATAR_NAMES = AVATARS.map((a) => a.name);
 const SKIN_COLORS = AVATARS.map((a) => a.body);
-const AVATAR_IMG = (i) => `assets/avatars/av_${String(i + 1).padStart(2, "0")}.jpg`;
+const AVATAR_IMG = (i) => `assets/avatars/avatar_${String(i + 1).padStart(2, "0")}.svg`;
 
 // ---------- 캐릭터: 그림(앞·옆·뒤)을 3D 세상에 세워서 보여줌 ----------
 // assets/chars/ch_XX.png = [앞(동작 포즈) | 옆 | 뒤 | 앞(서 있기)] 4칸
@@ -1888,7 +1889,7 @@ function setCharFrame(av, frame, mirror) {
   uv.setXY(0, L, 1); uv.setXY(1, R, 1); uv.setXY(2, L, 0); uv.setXY(3, R, 0);
   uv.needsUpdate = true;
 }
-function makeAvatar(color, name, opts = {}) {
+function makeAvatarSprite(color, name, opts = {}) {
   let ai = SKIN_COLORS.indexOf(color);
   if (ai < 0) ai = 0;
   const group = new THREE.Group(), inner = new THREE.Group();
@@ -1909,7 +1910,7 @@ function makeAvatar(color, name, opts = {}) {
   return av;
 }
 const _wrapA = (a) => Math.atan2(Math.sin(a), Math.cos(a));
-function animateAvatar(av, dt, hs, grounded, extra = {}) {
+function animateAvatarSprite(av, dt, hs, grounded, extra = {}) {
   const k = Math.min(1, dt * 12);
   const g = av.group.position, facing = av.group.rotation.y;
   // 카메라 쪽을 보게 세우고, 보는 방향에 따라 앞·옆·뒤 그림 고르기
@@ -1931,4 +1932,224 @@ function animateAvatar(av, dt, hs, grounded, extra = {}) {
   m.position.y += (bob - m.position.y) * k;
   m.rotation.z += (lean - m.rotation.z) * k;
   m.scale.y += (sy - m.scale.y) * k; m.scale.x += (sx - m.scale.x) * k;
+}
+
+
+// ===================================================================
+// 33차: 캐릭터 방식 3가지 (비교용) — ?chars=sprite | block | sheet3d
+//   sprite  : 캐릭터 시트 그림을 세워 보여 줌 (32차)
+//   block   : 올려 주신 패키지의 네모 블록형 3D 사람
+//   sheet3d : 캐릭터 시트 16종을 블록형 3D로 (얼굴은 시트 그림, 팔다리가 움직임)
+// ===================================================================
+let CHAR_MODE = (() => { const q = new URLSearchParams(location.search).get("chars"); return ["sprite", "block", "sheet3d"].includes(q) ? q : "block"; })();
+function makeAvatar(color, name, opts = {}) {
+  let ai = SKIN_COLORS.indexOf(color); if (ai < 0) ai = 0;
+  const av = CHAR_MODE === "block" ? makeAvatarPkg(PKG_COLORS[ai], name, opts) : CHAR_MODE === "sheet3d" ? makeAvatarSheet3D(ai, name, opts) : makeAvatarSprite(color, name, opts);
+  av.mode = CHAR_MODE; av.color = color; return av;
+}
+function animateAvatar(av, dt, hs, grounded, extra = {}) {
+  if (av.mode === "sprite" || !av.mode && av.mesh) animateAvatarSprite(av, dt, hs, grounded, extra);
+  else animateAvatarBlock(av, dt, hs, grounded, extra);
+}
+
+// ---------- 패키지 블록형 (올려 주신 world.js 그대로) ----------
+const PKG_NAMES = ["빨강 탐험가", "주황 모험가", "노랑 탐험가", "초록 공룡", "민트 요정", "파랑 히어로", "우주 탐험가", "보라 마법사", "분홍 고양이", "회색 로봇", "하늘 수호자", "라임 개구리", "산호 토끼", "남색 닌자", "금빛 발명가", "자주 왕관"];
+const PKG_COLORS = ["#ff6b6b", "#ffa94d", "#ffd43b", "#69db7c", "#38d9a9", "#4dabf7", "#748ffc", "#da77f2", "#f783ac", "#adb5bd", "#74c0fc", "#a9e34b", "#ff8787", "#364fc7", "#fcc419", "#be4bdb"];
+function pkgFaceTexture() {
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const g = c.getContext("2d");
+  g.fillStyle = "#ffd9b3"; g.fillRect(0, 0, 64, 64);
+  g.fillStyle = "#1d2433"; g.fillRect(16, 24, 8, 10); g.fillRect(40, 24, 8, 10);
+  g.fillStyle = "#e8737a"; g.fillRect(24, 44, 16, 4);
+  g.fillStyle = "rgba(255,120,120,.35)"; g.fillRect(8, 38, 10, 5); g.fillRect(46, 38, 10, 5);
+  const t = canvasTexture(c); t.magFilter = THREE.NearestFilter;
+  return t;
+}
+let _pkgFace = null;
+function makeAvatarPkg(color, name, opts = {}) {
+  _pkgFace = _pkgFace || pkgFaceTexture();
+  const box = (w, h, d, m) => new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+  const body = new THREE.MeshLambertMaterial({ color });
+  const dark = new THREE.MeshLambertMaterial({ color: shade(color, -0.35) });
+  const skin = new THREE.MeshLambertMaterial({ color: "#ffd9b3" });
+  const faceM = new THREE.MeshLambertMaterial({ map: _pkgFace });
+  const group = new THREE.Group(), inner = new THREE.Group();
+  group.add(inner);
+  const legL = new THREE.Group(), legR = new THREE.Group(), armL = new THREE.Group(), armR = new THREE.Group();
+  const leg = () => { const m = box(0.3, 0.75, 0.32, dark); m.position.y = -0.37; return m; };
+  legL.add(leg()); legR.add(leg());
+  legL.position.set(-0.18, 0.78, 0); legR.position.set(0.18, 0.78, 0);
+  const torso = box(0.78, 0.8, 0.44, body); torso.position.y = 1.18;
+  const arm = () => { const m = box(0.22, 0.72, 0.26, body); m.position.y = -0.32; const h = box(0.2, 0.18, 0.22, skin); h.position.y = -0.74; const g = new THREE.Group(); g.add(m, h); return g; };
+  armL.add(arm()); armR.add(arm());
+  armL.position.set(-0.52, 1.5, 0); armR.position.set(0.52, 1.5, 0);
+  const head = box(0.62, 0.6, 0.6, [skin, skin, dark, skin, faceM, skin]);
+  head.position.y = 1.9;
+  const hair = box(0.66, 0.16, 0.64, dark); hair.position.y = 2.22;
+  inner.add(legL, legR, torso, armL, armR, head, hair);
+  const ai = Math.max(0, PKG_COLORS.indexOf(color));
+  const deco = new THREE.MeshLambertMaterial({color: ["#fff1a3", "#ffffff", "#ffb3c7", "#c5f6fa"][ai % 4]});
+  const hat = box(.76,.18,.75, ai % 3 === 0 ? dark : deco);
+  if ([0,1,2,5,6,8,10,13,14].includes(ai)) { hat.position.set(0,2.3,0); inner.add(hat); }
+  if ([3,7,9,11,12,15].includes(ai)) { const ear1 = box(.17,.34,.2,deco), ear2 = ear1.clone(); ear1.position.set(-.22,2.46,0); ear2.position.set(.22,2.46,0); inner.add(ear1,ear2); }
+  if ([4,6,9,10,14].includes(ai)) { const badge = box(.22,.2,.07,deco); badge.position.set(0,1.26,.26); inner.add(badge); }
+  if ([5,7,13,15].includes(ai)) { const cape = box(.68,.8,.07,deco); cape.position.set(0,1.1,-.29); inner.add(cape); }
+  const accent = new THREE.MeshPhongMaterial({color: ["#ffdc72", "#9cf2ff", "#fff1ad", "#fda9dd"][ai % 4], shininess:85});
+  const addBall = (r, x, y, z, material=accent) => { const m = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), material); m.position.set(x,y,z); inner.add(m); return m; };
+  if ([3,11].includes(ai)) { addBall(.13,-.24,2.48,.10); addBall(.13,.24,2.48,.10); for (let j=0;j<3;j++) { const spike = new THREE.Mesh(new THREE.ConeGeometry(.16,.28,5),accent); spike.rotation.x = Math.PI/2; spike.position.set(0,1.55-j*.37,-.33); inner.add(spike); } }
+  if ([8,12].includes(ai)) { for(const dir of [-1,1]) { const ear = new THREE.Mesh(new THREE.ConeGeometry(.17, ai===12?.57:.39, 5),accent); ear.position.set(dir*.23,2.58,0); inner.add(ear); } }
+  if ([6,9,10].includes(ai)) { const visor = box(.56,.19,.08,new THREE.MeshPhongMaterial({color: ai===9?"#9bfef8":"#b1f5ff", shininess:100})); visor.position.set(0,1.96,.35); inner.add(visor); const antenna = box(.055,.32,.055,accent); antenna.position.set(0,2.53,0); inner.add(antenna); addBall(.095,0,2.71,0); }
+  if ([7,15].includes(ai)) { const crown = new THREE.Mesh(new THREE.ConeGeometry(.39,.62, ai===7?7:5),accent); crown.position.set(0,2.57,0); inner.add(crown); }
+  if ([0,1,2,14].includes(ai)) { const pack = box(.56,.61,.18,accent);pack.position.set(0,1.23,-.34);inner.add(pack); }
+  const trim = new THREE.MeshPhongMaterial({ color: ["#ffe082", "#b9ecff", "#ffd2f3", "#aff2bf"][ai%4], shininess: 92 });
+  const sole = new THREE.MeshLambertMaterial({ color: "#f4f7ff" });
+  const beltMat = new THREE.MeshLambertMaterial({ color: "#27334e" });
+  for(const [side, pivot] of [[-1,legL],[1,legR]]) { const shoe = box(.33,.15,.47,sole); shoe.position.set(0,-.72,.07); pivot.add(shoe); const stripe = box(.31,.07,.035,trim); stripe.position.set(0,-.70,.31); pivot.add(stripe); const cuff = box(.34,.075,.34,trim); cuff.position.set(0,-.12,0); pivot.add(cuff); }
+  const belt = box(.8,.085,.48,beltMat); belt.position.y=.86; inner.add(belt);
+  const chest = box(.22,.20,.035,trim); chest.position.set(0,1.31,.245); inner.add(chest);
+  const collar = box(.67,.11,.52,trim); collar.position.set(0,1.61,0); inner.add(collar);
+  const zipper = box(.038,.38,.035,sole); zipper.position.set(0,1.28,.257);inner.add(zipper);
+  if ([0,1,2,5,10,14].includes(ai)) { for(const x of [-.20,.20]) { const lens = new THREE.Mesh(new THREE.CylinderGeometry(.105,.105,.055,10),new THREE.MeshPhongMaterial({color:"#56d6ff",shininess:110})); lens.rotation.x=Math.PI/2;lens.position.set(x,2.34,.29);inner.add(lens); } }
+  if ([4,8,12].includes(ai)) { const knot = new THREE.Mesh(new THREE.SphereGeometry(.11,10,8),trim);knot.position.set(.26,2.33,.1);inner.add(knot); for(const dir of [-1,1]) {const wing=box(.18,.14,.055,trim); wing.rotation.z=dir*.38;wing.position.set(.26+dir*.13,2.34,.1);inner.add(wing);} }
+  if ([6,9,10].includes(ai)) { for(const dir of [-1,1]) {const pod=box(.14,.28,.22,trim);pod.position.set(dir*.38,2.0,0);inner.add(pod);} }
+  if ([13].includes(ai)) { const mask = box(.60,.16,.05,beltMat);mask.position.set(0,1.83,.33);inner.add(mask); }
+  if ([7,15].includes(ai)) { const jewel=new THREE.Mesh(new THREE.OctahedronGeometry(.13),trim);jewel.position.set(0,1.30,.33);inner.add(jewel); }
+  const hairMat = new THREE.MeshLambertMaterial({color: ["#6b3e2b","#e77298","#243b29","#f4c661","#b8dffd","#382c59","#ad2c25","#8e5e42"][ai%8]});
+  if (![6,9,10,11,13].includes(ai)) {
+    for (let j=0;j<3;j++) { const tuft = new THREE.Mesh(new THREE.ConeGeometry(.12 + j*.014,.24 + (j%2)*.055,5), hairMat); tuft.position.set(-.20+j*.20,2.36,.12); tuft.rotation.z=.24-j*.20; inner.add(tuft); }
+    for (const dir of [-1,1]) { const sideHair=box(.085,.21,.40,hairMat);sideHair.position.set(dir*.33,2.04,-.04);inner.add(sideHair); }
+  }
+  if (![6,9,10,13].includes(ai)) { const fringe=box(.54,.085,.065,hairMat); fringe.position.set(0,2.15,.328);inner.add(fringe); }
+  return blockFinish({ group, inner, legL, legR, armL, armR, head, styleIndex: ai }, name, opts);
+}
+function blockFinish(av, name, opts) {
+  const blob = new THREE.Mesh(new THREE.CircleGeometry(0.55, 16), new THREE.MeshBasicMaterial({ color: "#000", transparent: true, opacity: 0.28, depthWrite: false }));
+  blob.rotation.x = -Math.PI / 2;
+  let tag = null;
+  if (name) { tag = textSprite(name, { size: 48, bg: "rgba(20,40,90,.82)", color: "#fff", pad: 14, border: "#ffffff" }, opts.tagH || 0.55); tag.position.y = 3.05; av.group.add(tag); }
+  return Object.assign(av, { blob, tag, walk: 0, wasGrounded: true, landingFX: 0, animTime: 0 });
+}
+function animateAvatarBlock(av, dt, hs, grounded, extra = {}) {
+  const k = Math.min(1, dt * 12);
+  const variant = (av.styleIndex || 0) % 4;
+  const stride = [0.78, 0.68, 0.9, 0.72][variant];
+  const pace = [10, 12, 9, 11][variant];
+  const pose = { legL: 0.35, legR: -0.35, armL: -0.4, armR: 0.4 };
+  if (grounded) {
+    av.walk += dt * (hs > .05 ? hs * pace : 1.4);
+    const sw = Math.sin(av.walk) * stride * hs;
+    pose.legL = sw; pose.legR = -sw; pose.armL = -sw * .85; pose.armR = sw * .85;
+  } else {
+    const falling = typeof extra.verticalSpeed === "number" && extra.verticalSpeed < -1;
+    pose.legL = falling ? -.18 : .46; pose.legR = falling ? .35 : -.42;
+    pose.armL = falling ? -.8 : -1.45 - variant * .08; pose.armR = falling ? .8 : -1.35 - variant * .07;
+  }
+  if (extra.cheer) { pose.armL = -2.9 + Math.sin(extra.cheer * 9) * 0.3; pose.armR = -2.9 - Math.sin(extra.cheer * 9) * 0.3; }
+  for (const n of ["legL", "legR", "armL", "armR"]) av[n].rotation.x += (pose[n] - av[n].rotation.x) * k;
+  const turnLean = grounded && hs > .25 ? Math.sin(av.walk * .5) * .035 : 0;
+  av.inner.rotation.z += (turnLean - av.inner.rotation.z) * k;
+  av.inner.rotation.x += ((extra.tilt || 0) - av.inner.rotation.x) * k;
+  av.inner.rotation.y += ((extra.spin || 0) - av.inner.rotation.y) * k;
+  if (av.wasGrounded === false && grounded) av.landingFX = .13;
+  av.wasGrounded = grounded;
+  av.landingFX = Math.max(0, (av.landingFX || 0) - dt);
+  const squash = av.landingFX > 0 ? Math.sin((av.landingFX / .13) * Math.PI) * .075 : 0;
+  const pre = !grounded && extra.verticalSpeed > 1 ? .025 : 0;
+  av.inner.scale.y += (1 - squash + pre - av.inner.scale.y) * k;
+  av.inner.scale.x += (1 + squash * .42 - av.inner.scale.x) * k;
+  av.inner.scale.z += (1 + squash * .42 - av.inner.scale.z) * k;
+  const cheerBounce = extra.cheer ? Math.abs(Math.sin(extra.cheer * 8)) * .11 : 0;
+  const bob = cheerBounce + (grounded && hs > .1 ? Math.abs(Math.sin(av.walk)) * .07 * hs : (!grounded ? .035 : 0));
+  av.inner.position.y += (bob - av.inner.position.y) * k;
+}
+
+// ---------- 캐릭터 시트 16종을 블록형 3D로 ----------
+//  top: 윗옷, acc: 포인트색, pants: 바지(skirt면 치마), shoe, hair, long: 긴 머리, x: 소품
+const SHEET3D = [
+  { top: "#ffffff", acc: "#2f6fdc", pants: "#1f2533", shoe: "#2f6fdc", hair: "#6b3e22", x: ["goggles", "pack"] },
+  { top: "#ffd1e3", acc: "#ff7fb0", pants: "#ff9cc3", skirt: 1, shoe: "#ff7fb0", hair: "#ff8fbf", long: 1, x: ["catphones", "pack"] },
+  { top: "#2f9e44", acc: "#8ce99a", pants: "#1f2533", shoe: "#2f9e44", hair: "#2b2b2b", x: ["dino", "pack"] },
+  { top: "#fff3bf", acc: "#ffc93c", pants: "#ffd43b", skirt: 1, shoe: "#ffc93c", hair: "#ffd25e", long: 1, x: ["bow", "pack"] },
+  { top: "#ffffff", acc: "#4dabf7", pants: "#1f2533", shoe: "#74c0fc", hair: "#e9ecef", x: ["goggles", "flask", "coat"] },
+  { top: "#2b2140", acc: "#8b5cf6", pants: "#8b5cf6", skirt: 1, shoe: "#5f3dc4", hair: "#2b2140", long: 1, x: ["catphones", "pack"] },
+  { top: "#1d1d24", acc: "#e23b3b", pants: "#1d1d24", shoe: "#e23b3b", hair: "#e03131", x: ["cap", "pack"] },
+  { top: "#f3e3cf", acc: "#b07a4f", pants: "#c9a27a", shoe: "#f8f1e7", hair: "#8e5e42", long: 1, x: ["buns", "pack"] },
+  { top: "#ffffff", acc: "#4a8fe8", pants: "#ffffff", shoe: "#4a8fe8", hair: "#6b3e22", x: ["helmet", "pack"] },
+  { top: "#ffd6e7", acc: "#ff8fbf", pants: "#ffb3cf", skirt: 1, shoe: "#ff8fbf", hair: "#ff9cc8", long: 1, x: ["bunny", "pack"] },
+  { top: "#ffffff", acc: "#1d1d24", pants: "#1d1d24", shoe: "#1d1d24", hair: "#3a2a20", x: ["panda", "pack"] },
+  { top: "#4c2a99", acc: "#ffd43b", pants: "#6a3fd0", skirt: 1, shoe: "#4c2a99", hair: "#2b2140", long: 1, x: ["wizard", "staff"] },
+  { top: "#cfd8e8", acc: "#d4a72c", pants: "#9aa7bd", shoe: "#cfd8e8", hair: "#ffd25e", x: ["knight", "cape", "sword"] },
+  { top: "#1d1d24", acc: "#e03131", pants: "#1d1d24", shoe: "#1d1d24", hair: "#1d1d24", x: ["ninja", "sword"] },
+  { top: "#a5d8ff", acc: "#1c7ed6", pants: "#74c0fc", shoe: "#1c7ed6", hair: null, x: ["robot"] },
+  { top: "#e03131", acc: "#ffffff", pants: "#1d1d24", shoe: "#ffffff", hair: "#6b3e22", x: ["headband", "pack", "num10"] },
+];
+let _sheetFaces = null, _faceLoaded = false;
+const _sheetFaceMat = {}, _faceClones = [];
+function sheetFaceMat(i) {
+  if (_sheetFaceMat[i]) return _sheetFaceMat[i];
+  if (!_sheetFaces) {
+    _sheetFaces = new THREE.TextureLoader().load("assets/chars/faces.jpg", () => { _faceLoaded = true; _faceClones.forEach((t) => (t.needsUpdate = true)); });
+    _sheetFaces.colorSpace = THREE.SRGBColorSpace;
+  }
+  const t = _sheetFaces.clone(); t.repeat.set(0.25, 0.25); t.offset.set((i % 4) * 0.25, 1 - 0.25 - Math.floor(i / 4) * 0.25);
+  if (_faceLoaded) t.needsUpdate = true; else _faceClones.push(t);
+  return (_sheetFaceMat[i] = new THREE.MeshLambertMaterial({ map: t }));
+}
+function numTex(n, bg, fg) {
+  const c = document.createElement("canvas"); c.width = c.height = 64; const g = c.getContext("2d");
+  g.fillStyle = bg; g.fillRect(0, 0, 64, 64); g.fillStyle = fg; g.font = "bold 40px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(n, 32, 36);
+  return canvasTexture(c);
+}
+function makeAvatarSheet3D(ai, name, opts = {}) {
+  const S = SHEET3D[ai] || SHEET3D[0];
+  const L = (c) => new THREE.MeshLambertMaterial({ color: c });
+  const Ph = (c, sh = 80) => new THREE.MeshPhongMaterial({ color: c, shininess: sh });
+  const box = (w, h, d, m) => new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+  const topM = L(S.top), accM = L(S.acc), pantsM = L(S.pants), shoeM = L(S.shoe), skinM = L("#ffd9b3"), soleM = L("#f4f7ff");
+  const hairM = S.hair ? L(S.hair) : L(S.acc);
+  const group = new THREE.Group(), inner = new THREE.Group(); group.add(inner);
+  const legL = new THREE.Group(), legR = new THREE.Group(), armL = new THREE.Group(), armR = new THREE.Group();
+  const leg = () => { const g = new THREE.Group(); const m = box(0.3, 0.6, 0.32, pantsM); m.position.y = -0.3; g.add(m); const sk = box(0.29, 0.12, 0.31, skinM); sk.position.y = -0.62; if (S.skirt) g.add(sk); const sh = box(0.34, 0.2, 0.48, shoeM); sh.position.set(0, -0.72, 0.06); g.add(sh); const so = box(0.35, 0.06, 0.49, soleM); so.position.set(0, -0.83, 0.06); g.add(so); return g; };
+  legL.add(leg()); legR.add(leg());
+  legL.position.set(-0.18, 0.86, 0); legR.position.set(0.18, 0.86, 0);
+  const torso = box(0.8, 0.78, 0.46, topM); torso.position.y = 1.24; inner.add(torso);
+  // 포인트: 소매·밑단·가운데 줄
+  const hem = box(0.82, 0.12, 0.48, accM); hem.position.y = 0.9; inner.add(hem);
+  const stripe = box(0.14, 0.62, 0.02, accM); stripe.position.set(0, 1.26, 0.235); if (!S.x.includes("num10")) inner.add(stripe);
+  if (S.skirt) { const sk = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.56, 0.36, 8), pantsM); sk.position.y = 0.72; inner.add(sk); }
+  const arm = (side) => { const g = new THREE.Group(); const m = box(0.24, 0.64, 0.28, topM); m.position.y = -0.3; const cuff = box(0.26, 0.12, 0.3, accM); cuff.position.y = -0.58; const h = box(0.22, 0.18, 0.24, skinM); h.position.y = -0.72; g.add(m, cuff, h); return g; };
+  armL.add(arm(-1)); armR.add(arm(1));
+  armL.position.set(-0.53, 1.56, 0); armR.position.set(0.53, 1.56, 0);
+  inner.add(legL, legR, armL, armR);
+  // 머리: 앞면은 캐릭터 시트의 얼굴 그림
+  const head = box(0.74, 0.7, 0.66, [hairM, hairM, hairM, skinM, sheetFaceMat(ai), hairM]);
+  head.position.y = 2.0; inner.add(head);
+  if (S.hair) { const top = box(0.8, 0.16, 0.72, hairM); top.position.set(0, 2.38, -0.02); inner.add(top); }
+  if (S.long) { const back = box(0.82, 0.9, 0.18, hairM); back.position.set(0, 1.78, -0.36); inner.add(back); }
+  const at = (m, x, y, z) => { m.position.set(x, y, z); inner.add(m); return m; };
+  const ball = (r, m) => new THREE.Mesh(new THREE.SphereGeometry(r, 12, 10), m);
+  for (const it of S.x) switch (it) {
+    case "pack": at(box(0.56, 0.6, 0.22, accM), 0, 1.26, -0.35); break;
+    case "goggles": { const band = box(0.8, 0.09, 0.7, L("#1f2533")); at(band, 0, 2.3, 0); for (const sx of [-0.18, 0.18]) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.08, 12), Ph(ai === 4 ? "#4dabf7" : "#56d6ff", 120)); l.rotation.x = Math.PI / 2 - 0.4; at(l, sx, 2.36, 0.3); } } break;
+    case "catphones": { const band = box(0.84, 0.08, 0.16, accM); at(band, 0, 2.42, 0); for (const sx of [-1, 1]) { at(box(0.12, 0.3, 0.3, accM), sx * 0.43, 2.02, 0); const e = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.3, 4), accM); e.rotation.y = Math.PI / 4; at(e, sx * 0.24, 2.6, 0); } } break;
+    case "dino": { const hood = box(0.86, 0.82, 0.74, topM); at(hood, 0, 2.06, -0.06); for (let j = 0; j < 4; j++) { const sp = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.26, 4), L(S.acc)); sp.rotation.x = -0.3 - j * 0.35; at(sp, 0, 2.5 - j * 0.12, 0.1 - j * 0.24); } at(box(0.2, 0.1, 0.08, L("#ffffff")), -0.22, 2.44, 0.34); at(box(0.2, 0.1, 0.08, L("#ffffff")), 0.22, 2.44, 0.34); const tail = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.6, 6), topM); tail.rotation.x = -1.9; at(tail, 0, 0.85, -0.45); } break;
+    case "bow": { const knot = box(0.16, 0.16, 0.12, accM); at(knot, 0, 2.5, 0.1); for (const sx of [-1, 1]) { const w = box(0.3, 0.24, 0.08, accM); w.rotation.z = sx * 0.3; at(w, sx * 0.22, 2.52, 0.1); } } break;
+    case "flask": { const f = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.28, 8), Ph("#4dabf7", 120)); f.position.set(0, -0.86, 0.06); armR.add(f); } break;
+    case "coat": { const c = box(0.84, 0.5, 0.06, topM); at(c, 0, 0.66, -0.2); } break;
+    case "cap": { const c = box(0.82, 0.2, 0.76, L("#1d1d24")); at(c, 0, 2.43, 0); const brim = box(0.6, 0.06, 0.34, L("#1d1d24")); at(brim, 0, 2.36, -0.48); at(box(0.2, 0.1, 0.05, accM), 0, 2.46, 0.39); } break;
+    case "buns": { for (const sx of [-1, 1]) { at(ball(0.2, hairM), sx * 0.3, 2.5, -0.05); at(ball(0.08, L("#ffffff")), sx * 0.3, 2.64, 0.08); } } break;
+    case "helmet": { const h = new THREE.Mesh(new THREE.SphereGeometry(0.62, 18, 14), new THREE.MeshPhongMaterial({ color: "#d8ecff", shininess: 140, transparent: true, opacity: 0.32, depthWrite: false })); at(h, 0, 2.02, 0); const ring = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.07, 8, 20), L("#ffffff")); ring.rotation.x = Math.PI / 2; at(ring, 0, 1.58, 0); for (const sx of [-1, 1]) at(box(0.14, 0.3, 0.3, accM), sx * 0.46, 2.02, 0); } break;
+    case "bunny": { for (const sx of [-1, 1]) { const e = box(0.16, 0.56, 0.12, L("#ffffff")); e.rotation.z = -sx * 0.12; at(e, sx * 0.2, 2.72, 0); at(box(0.08, 0.4, 0.02, accM), sx * 0.2, 2.72, 0.07).rotation.z = -sx * 0.12; } } break;
+    case "panda": { const hood = box(0.86, 0.8, 0.74, L("#ffffff")); at(hood, 0, 2.06, -0.06); for (const sx of [-1, 1]) at(ball(0.16, L("#1d1d24")), sx * 0.34, 2.5, 0); } break;
+    case "wizard": { const br = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.06, 16), L(S.top)); at(br, 0, 2.38, 0); const hat = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.9, 12), L(S.top)); hat.rotation.z = 0.25; at(hat, -0.1, 2.85, 0); const band = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.43, 0.08, 12), accM); at(band, 0, 2.45, 0); } break;
+    case "staff": { const st = box(0.06, 1.2, 0.06, L("#8b5a2b")); st.position.set(0, -0.6, 0.12); armR.add(st); const gem = ball(0.12, Ph("#da77f2", 120)); gem.position.set(0, -0.02, 0.12); armR.add(gem); } break;
+    case "knight": { const hel = box(0.82, 0.78, 0.74, Ph("#cfd8e8", 100)); at(hel, 0, 2.04, -0.05); at(box(0.6, 0.3, 0.05, sheetFaceMat(ai)), 0, 2.0, 0.33); const plume = box(0.1, 0.3, 0.5, L("#4a8fe8")); at(plume, 0, 2.56, -0.05); at(box(0.86, 0.08, 0.78, accM), 0, 2.36, -0.05); } break;
+    case "cape": { const c = box(0.78, 1.0, 0.05, L("#2f6fdc")); at(c, 0, 1.12, -0.3); } break;
+    case "sword": { const sw = box(0.08, 0.95, 0.04, Ph(ai === 13 ? "#e03131" : "#9ec5ff", 120)); sw.rotation.z = 0.6; at(sw, 0, 1.3, -0.42); } break;
+    case "ninja": { const hood = box(0.8, 0.76, 0.72, L("#1d1d24")); at(hood, 0, 2.02, -0.04); at(box(0.62, 0.22, 0.05, sheetFaceMat(ai)), 0, 2.0, 0.33); at(box(0.82, 0.08, 0.74, accM), 0, 2.2, -0.04); const tail = box(0.08, 0.3, 0.05, accM); tail.rotation.z = 0.5; at(tail, 0.3, 2.1, -0.4); } break;
+    case "robot": { const ear = Ph("#1c7ed6", 100); for (const sx of [-1, 1]) { const e = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.34, 4), ear); at(e, sx * 0.28, 2.5, 0); at(box(0.12, 0.26, 0.26, ear), sx * 0.43, 2.0, 0); } at(box(0.3, 0.24, 0.06, Ph("#74f0ff", 150)), 0, 1.3, 0.24); } break;
+    case "headband": at(box(0.78, 0.1, 0.7, L("#e03131")), 0, 2.26, 0); break;
+    case "num10": { const n = box(0.4, 0.4, 0.02, new THREE.MeshLambertMaterial({ map: numTex("10", S.top, "#ffffff") })); at(n, 0, 1.28, 0.235); } break;
+  }
+  return blockFinish({ group, inner, legL, legR, armL, armR, head, styleIndex: ai }, name, opts);
 }

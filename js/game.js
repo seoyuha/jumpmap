@@ -19,7 +19,7 @@ const G = {
   settings: { wrongTo: "course", gates: true, photos: true },
   off: {},
   color: SKIN_COLORS[5],
-  pos: new THREE.Vector3(), vel: new THREE.Vector3(), facing: 0, yaw: 0, pitch: 0.49, camDist: 9.3,
+  pos: new THREE.Vector3(), vel: new THREE.Vector3(), facing: 0, yaw: 0, pitch: 0.47, camDist: 9.5,
   grounded: false, ground: null, lastGrounded: -1, jumpQueued: -1, launching: false, hop: null,
   checkpoint: null, maxCp: 0, stunUntil: 0, pendingWrong: null,
   floorQ: [], solved: [], qFloor: 0, correct: 0, wrong: 0, falls: 0, gatesCleared: 0, streak: 0,
@@ -146,6 +146,7 @@ function startRun() {
 }
 
 function placeAt(s) {
+  G.camSnap = true; _camIdx = Math.max(0, G.C.path.findIndex((w) => w.s === s));
   G.pos.set(s.cx, s.maxY + 0.02, s.cz);
   G.vel.set(0, 0, 0);
   G.facing = s.theta; G.yaw = s.theta + Math.PI;
@@ -209,7 +210,18 @@ const endDrag = (e) => {
 };
 addEventListener("pointerup", endDrag);
 addEventListener("pointercancel", endDrag);
-$("game").addEventListener("wheel", (e) => { G.camDist = Math.max(4, Math.min(16, G.camDist + e.deltaY * 0.01)); }, { passive: true });
+// 태블릿: 두 손가락 벌리기/모으기로 카메라 거리 조절
+{
+  let pinch = 0;
+  const pd = (e) => Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+  $("game").addEventListener("touchstart", (e) => { if (e.touches.length === 2) { pinch = pd(e); drag = null; } }, { passive: true });
+  $("game").addEventListener("touchmove", (e) => {
+    if (e.touches.length !== 2 || !pinch) return;
+    const d = pd(e); G.camDist = Math.max(6, Math.min(16, G.camDist * (pinch / d))); pinch = d; G.lastManualCam = now;
+  }, { passive: true });
+  $("game").addEventListener("touchend", (e) => { if (e.touches.length < 2) pinch = 0; }, { passive: true });
+}
+$("game").addEventListener("wheel", (e) => { G.camDist = Math.max(6, Math.min(16, G.camDist + e.deltaY * 0.01)); }, { passive: true });
 
 // 조이스틱
 {
@@ -408,10 +420,7 @@ function physicsStep(dt) {
   }
   // 타워를 돌아 올라갈 때 카메라가 이동 방향을 부드럽게 따라오도록 한다.
   // 사용자가 직접 화면을 돌리는 동안은 자동 회전을 멈춰 조작을 방해하지 않는다.
-  if (f > 0.35 && Math.abs(r) < 0.32 && amount > 0.3 && now - G.lastManualCam > 2.0) {
-    const travelYaw = Math.atan2(-mx, -mz);
-    G.yaw = angleLerp(G.yaw, travelYaw, 1 - Math.exp(-dt * (G.grounded ? 1.25 : 0.6)));
-  }
+  // (33차) 이동 방향을 따라 도는 자동 회전은 없앰 → 카메라는 updateCamera에서 "다음 발판" 기준으로만 천천히 맞춤
 
   // 바람: 발판 위에 있을 때 옆으로 밀림
   for (const w of C.winds) {
@@ -856,6 +865,22 @@ const obbyCameraLook = new THREE.Vector3();
 const obbyCameraPosition = new THREE.Vector3();
 let obbyCameraReady = false;
 let obbyCameraLookReady = false;
+// 카메라용: 지금 서 있는(또는 마지막) 발판 다음의 코스 발판
+let _camIdx = 0;
+function camNextPad() {
+  const P = G.C && G.C.path; if (!P || !P.length) return null;
+  const cur = G.grounded && G.ground ? G.ground : null;
+  if (cur) {
+    let i = -1;
+    if (cur.kind === "option") i = P.findIndex((w) => w.option && w.floor === cur.floor);
+    else i = P.findIndex((w) => w.s === cur);
+    if (i >= 0) _camIdx = i;
+  }
+  const n = P[Math.min(P.length - 1, _camIdx + 1)];
+  // 문제 광장: 다음은 가운데 정답 발판 → 그다음 착지대까지 보이게
+  if (n && n.option && G.solved[n.floor]) return P[Math.min(P.length - 1, _camIdx + 2)].s;
+  return n ? n.s : null;
+}
 function updateCamera(dt) {
   if (G.mapView && (G.state === "play" || G.state === "menu")) {
     const a = Math.atan2(G.pos.z, G.pos.x), R = 70;
@@ -878,46 +903,33 @@ function updateCamera(dt) {
     G.yaw = angleLerp(G.yaw, G.facing, k);
     G.camDist += (6.5 - G.camDist) * k;
   }
-  const tx = G.pos.x, ty = G.pos.y + 1.7, tz = G.pos.z;
-  // 다음 발판과 위쪽 구간이 보이도록 약간 높은 시야 및 이동 방향 선행 시선.
-  const travelSpeed = Math.hypot(G.vel.x, G.vel.z);
-  const lead = Math.min(1.0, travelSpeed * 0.11);
-  const riseLook = Math.max(0, Math.min(0.85, G.vel.y * 0.045));
-  const camDistance = Math.max(7.0, G.camDist);
-  obbyCameraPosition.set(tx + Math.sin(G.yaw) * Math.cos(G.pitch) * camDistance,
-    ty + Math.sin(G.pitch) * camDistance, tz + Math.cos(G.yaw) * Math.cos(G.pitch) * camDistance);
-  obbyCameraTarget.set(tx + (travelSpeed > 0.15 ? G.vel.x / travelSpeed * lead : 0),
-    ty + 0.35 + riseLook,
-    tz + (travelSpeed > 0.15 ? G.vel.z / travelSpeed * lead : 0));
-  // 나선형 타워의 중앙 벽을 카메라가 뚫거나 벽 안에 들어가지 않도록 보정.
-  // 충돌 판정은 바꾸지 않고 카메라 위치만 원통 외측(반지름 9.5 이상)에 유지한다.
-  const towerCameraRadius = Math.hypot(obbyCameraPosition.x, obbyCameraPosition.z);
-  if (towerCameraRadius < 9.5) {
-    const playerRadius = Math.hypot(tx, tz);
-    const outwardX = playerRadius > 0.1 ? tx / playerRadius : Math.sin(G.yaw);
-    const outwardZ = playerRadius > 0.1 ? tz / playerRadius : Math.cos(G.yaw);
-    obbyCameraPosition.x = outwardX * 9.5;
-    obbyCameraPosition.z = outwardZ * 9.5;
+  const tx = G.pos.x, ty = G.pos.y + 1.6, tz = G.pos.z;
+  // (33차) 코스 카메라: "다음 발판" 쪽을 향하도록 카메라를 플레이어 뒤·바깥쪽에 두고,
+  //   시선은 플레이어와 다음 발판 사이를 봐서 다음 발판이 화면에 잘 보이게 한다.
+  const nxt = camNextPad();
+  let fx = 0, fz = 0;
+  if (nxt) { fx = nxt.cx - tx; fz = nxt.cz - tz; }
+  let fl = Math.hypot(fx, fz);
+  if (fl < 0.8) { fx = -Math.sin(G.yaw); fz = -Math.cos(G.yaw); fl = 1; }
+  fx /= fl; fz /= fl;
+  const pr = Math.hypot(tx, tz) || 1, ox = tx / pr, oz = tz / pr;           // 타워 바깥 방향
+  const dx = -fx * 0.86 + ox * 0.5, dz = -fz * 0.86 + oz * 0.5;           // 뒤 + 바깥쪽
+  const wantYaw = Math.atan2(dx, dz);
+  const manual = now - G.lastManualCam < 3.0;
+  if (!manual && (G.state === "play" || G.state === "menu")) {
+    G.yaw = angleLerp(G.yaw, wantYaw, 1 - Math.exp(-dt * (G.camSnap ? 20 : 1.8)));
+    G.camSnap = false;
   }
-  // 13차: 타워 바깥쪽에서 플레이어를 바라보는 카메라 시야 확보.
-  // 플레이어의 방사 방향과 카메라 방향이 지나치게 벌어지면 기둥이 사이에 끼므로
-  // 카메라만 플레이어 주변의 원호로 보정한다. 점프·충돌·서버 기록은 변경하지 않는다.
-  const playerRadial = Math.hypot(tx, tz);
-  if (playerRadial > 10) {
-    const playerAngle = Math.atan2(tz, tx);
-    const cameraAngle = Math.atan2(obbyCameraPosition.z, obbyCameraPosition.x);
-    const difference = Math.atan2(Math.sin(cameraAngle - playerAngle), Math.cos(cameraAngle - playerAngle));
-    const maxAngle = 0.53;
-    if (Math.abs(difference) > maxAngle) {
-      const clampedAngle = playerAngle + Math.sign(difference) * maxAngle;
-      const correctedRadius = Math.max(9.5, Math.hypot(obbyCameraPosition.x, obbyCameraPosition.z));
-      obbyCameraPosition.x = Math.cos(clampedAngle) * correctedRadius;
-      obbyCameraPosition.z = Math.sin(clampedAngle) * correctedRadius;
-    }
-  }
-  // 다음 층의 발판이 보이되, 시선이 갑자기 위아래로 튀지 않게 제한한다.
-  obbyCameraTarget.y = Math.min(ty + 1.3, obbyCameraTarget.y);
-
+  const camDistance = Math.max(6, Math.min(16, G.camDist || 9.5));
+  const pitch = Math.max(0.12, Math.min(1.2, G.pitch));
+  obbyCameraPosition.set(tx + Math.sin(G.yaw) * Math.cos(pitch) * camDistance,
+    ty + Math.sin(pitch) * camDistance, tz + Math.cos(G.yaw) * Math.cos(pitch) * camDistance);
+  // 시선: 다음 발판 쪽으로 30% (최대 4.5m), 높이는 다음 발판 높이를 살짝 반영
+  const look = nxt ? Math.min(4.5, fl * 0.3) : 0;
+  obbyCameraTarget.set(tx + fx * look, ty + 0.4 + (nxt ? Math.max(-0.6, Math.min(1.4, (nxt.maxY - G.pos.y) * 0.35)) : 0), tz + fz * look);
+  // 가운데 타워 벽 안으로 카메라가 들어가지 않게만 밀어냄
+  const camR = Math.hypot(obbyCameraPosition.x, obbyCameraPosition.z);
+  if (camR < 10) { const k = 10 / Math.max(0.1, camR); obbyCameraPosition.x *= k; obbyCameraPosition.z *= k; }
   // 플레이어가 리스폰할 때 먼 거리를 천천히 날아가지 않도록 추적 위치 초기화
   if (!obbyCameraReady || camera.position.distanceTo(obbyCameraPosition) > 23) {
     camera.position.copy(obbyCameraPosition);
@@ -978,6 +990,7 @@ function gameFrame(dt, t) {
   animateAvatar(av, dt, hs, G.grounded, {
     tilt: left > 0 ? -Math.sin((1 - left / 0.75) * Math.PI) * 1.3 : 0,
     cheer: G.state === "finish" && G.grounded && hs < 0.2 ? now - G.cheer : 0,
+    verticalSpeed: G.vel.y,
   });
   updateBlob(av);
   av.group.visible = G.state !== "title" && G.state !== "lobby";
