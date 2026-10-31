@@ -1847,28 +1847,27 @@ function animateWorld(C, M, t, dt) {
   else { animateWorldHD(C, M, t, dt); const U = scene && scene.userData; if (U && U.sky) { U.sky.position.copy(camera.position); U.stars.position.copy(camera.position); } }
 }
 
-// 34차: 올려 주신 패키지의 블록형 3D 캐릭터 16종 (이름·색이 캐릭터 구분값)
 const AVATARS = [
-  { name: "빨강 탐험가", body: "#ff6b6b" },
-  { name: "주황 모험가", body: "#ffa94d" },
-  { name: "노랑 탐험가", body: "#ffd43b" },
-  { name: "초록 공룡", body: "#69db7c" },
-  { name: "민트 요정", body: "#38d9a9" },
-  { name: "파랑 히어로", body: "#4dabf7" },
-  { name: "우주 탐험가", body: "#748ffc" },
-  { name: "보라 마법사", body: "#da77f2" },
-  { name: "분홍 고양이", body: "#f783ac" },
-  { name: "회색 로봇", body: "#adb5bd" },
-  { name: "하늘 수호자", body: "#74c0fc" },
-  { name: "라임 개구리", body: "#a9e34b" },
-  { name: "산호 토끼", body: "#ff8787" },
-  { name: "남색 닌자", body: "#364fc7" },
-  { name: "금빛 발명가", body: "#fcc419" },
-  { name: "자주 왕관", body: "#be4bdb" },
+  { name: "파란 후드 소년", body: "#2f6fdc" },
+  { name: "분홍 후드 소녀", body: "#ff7fb0" },
+  { name: "초록 공룡 후드", body: "#3fbf55" },
+  { name: "노란 리본 소녀", body: "#ffc93c" },
+  { name: "하얀 과학자", body: "#7cc4f5" },
+  { name: "보라 고양이", body: "#8b5cf6" },
+  { name: "빨간 모자", body: "#e23b3b" },
+  { name: "탐험가 소녀", body: "#b07a4f" },
+  { name: "우주비행사", body: "#4a8fe8" },
+  { name: "토끼 후드", body: "#ffb3cf" },
+  { name: "판다 후드", body: "#4b4f5c" },
+  { name: "마법사", body: "#6a3fd0" },
+  { name: "기사", body: "#d4a72c" },
+  { name: "닌자", body: "#2a2a35" },
+  { name: "로봇", body: "#3ec8f0" },
+  { name: "체육소년", body: "#f05a28" },
 ];
 const AVATAR_NAMES = AVATARS.map((a) => a.name);
 const SKIN_COLORS = AVATARS.map((a) => a.body);
-const AVATAR_IMG = (i) => `assets/avatars/avatar_${String(i + 1).padStart(2, "0")}.svg`;
+const AVATAR_IMG = (i) => `assets/avatars/av_${String(i + 1).padStart(2, "0")}.jpg`;
 
 // ---------- 캐릭터: 그림(앞·옆·뒤)을 3D 세상에 세워서 보여줌 ----------
 // assets/chars/ch_XX.png = [앞(동작 포즈) | 옆 | 뒤 | 앞(서 있기)] 4칸
@@ -1941,7 +1940,7 @@ function animateAvatarSprite(av, dt, hs, grounded, extra = {}) {
 //   block   : 올려 주신 패키지의 네모 블록형 3D 사람
 //   sheet3d : 캐릭터 시트 16종을 블록형 3D로 (얼굴은 시트 그림, 팔다리가 움직임)
 // ===================================================================
-let CHAR_MODE = (() => { const q = new URLSearchParams(location.search).get("chars"); return ["sprite", "block", "sheet3d"].includes(q) ? q : "block"; })();
+let CHAR_MODE = (() => { const q = new URLSearchParams(location.search).get("chars"); return ["sprite", "block", "sheet3d"].includes(q) ? q : "sprite"; })();
 function makeAvatar(color, name, opts = {}) {
   let ai = SKIN_COLORS.indexOf(color); if (ai < 0) ai = 0;
   const av = CHAR_MODE === "block" ? makeAvatarPkg(PKG_COLORS[ai], name, opts) : CHAR_MODE === "sheet3d" ? makeAvatarSheet3D(ai, name, opts) : makeAvatarSprite(color, name, opts);
