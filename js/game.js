@@ -12,6 +12,7 @@ const CHO = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
 const chosung = (s) => [...s].map((ch) => { const c = ch.charCodeAt(0) - 0xac00; return c >= 0 && c < 11172 ? CHO[Math.floor(c / 588)] : ch; }).join("");
 
 let now = 0;
+
 const G = {
   unit: null, C: null, M: null, hero: null,
   state: "title",          // title | lobby | play | paused | menu | finish
@@ -33,10 +34,10 @@ let stick = null, turnHold = 0;
 
 // ---------------- 세계 만들기 ----------------
 function setupWorld(unit) {
-  if (G.unit === unit && G.C) return;
+  if (G.unit === unit && G.C && G.C.seed === (G.seed || 0)) return;
   if (G.M) { scene.remove(G.M.root); }
   G.unit = unit;
-  G.C = buildCourse(unit);
+  G.C = buildCourse(unit, G.seed || 0);
   G.M = buildWorldMeshes(scene, G.C);
   if (!G.hero) {
     G.hero = makeAvatar(G.color);
@@ -66,6 +67,7 @@ function applyMapStyle(style) {
     });
   }
   moveFlag();
+  if (G.flagsOn) G.flagsOn.forEach((zi) => setCheckpointFlag(G.M, zi, true));
   if (G.state === "play") toast(`🗺 맵이 「${MAP_STYLES[style]}」으로 바뀌었어요`);
 }
 function setHeroColor(c) {
@@ -128,6 +130,9 @@ function prepareRun() {
   for (const s of C.crumbles) { s.active = true; s.crumbleAt = 0; }
   Object.assign(G, { correct: 0, wrong: 0, falls: 0, gatesCleared: 0, streak: 0, wrongLog: [], runTime: 0, finishTime: 0, maxCp: 0, pendingWrong: null, qFloor: 0, cheer: 0, hop: null, launching: false, stunUntil: 0 });
   G.checkpoint = C.plazas[0];
+  G.respawn = C.plazas[0];
+  if (G.flagsOn) G.flagsOn.forEach((zi) => setCheckpointFlag(G.M, zi, false));
+  G.flagsOn = new Set();
   placeAt(C.plazas[0]);
   closeGatePanel(); hideQPanel(); hideFeedback();
   updateHud();
@@ -155,6 +160,7 @@ function placeAt(s) {
 }
 function moveFlag() {
   const s = G.checkpoint, f = G.M && G.M.flag;
+  if (f) f.visible = false;   // 37차: 체크포인트는 5층마다 서 있는 깃발로
   if (!f || !s) return;
   if (G.M.flagCloth) G.M.flagCloth.material.color.setHex(s.cp > 0 ? 0x59edac : 0xffd55b);
   const [x, z] = toWorld(s, s.hx - 0.5, -s.hz + 0.5);
@@ -298,8 +304,11 @@ function knock(b) {
   const side = Math.sign(lz) || 1;
   // 막대의 로컬 z 방향(막대에 수직)으로 튕김
   const wx = b.sn * side, wz = b.c * side;
-  G.vel.set(wx * 6.5, 6.2, wz * 6.5);
-  G.stunUntil = now + 0.75; G.hop = null; G.launching = false;
+  // 37차: 낮은 막대·미는 블록은 살짝 넘어지는 정도 (발판 밖으로 날아가지 않게)
+  const soft = b.kind === "sweep" || b.kind === "pusher";
+  G.vel.set(wx * (soft ? 3.0 : 6.5), soft ? 5.0 : 6.2, wz * (soft ? 3.0 : 6.5));
+  G.stunUntil = now + (soft ? 0.5 : 0.75); G.hop = null; G.launching = false;
+  if (G.hero) G.hero.landFX = 0;
   Sound.play("knock");
 }
 function startHop(target) {
@@ -344,7 +353,7 @@ function spawnStageFX(kind, point, color = 0xffd43b) {
   ring.position.copy(center); ring.position.y += .08;
   scene.add(ring);
   const sparks = [];
-  const count = kind === 'finish' ? 15 : kind === 'checkpoint' ? 11 : 6;
+  const count = kind === 'finish' ? 15 : kind === 'checkpoint' ? 11 : kind === 'land' ? 0 : 6;
   for (let i = 0; i < count; i++) {
     const a = (i / count) * Math.PI * 2, radius = .25 + Math.random() * .45;
     const m = new THREE.Mesh(fxSparkGeo, new THREE.MeshBasicMaterial({color: i%3===0 ? 0xffffff : color, transparent:true, opacity:1, depthWrite:false}));
@@ -352,7 +361,8 @@ function spawnStageFX(kind, point, color = 0xffd43b) {
     scene.add(m);
     sparks.push({m, vx: Math.cos(a)*(kind==='finish'?3.5:2), vy: 1.8+Math.random()*2.4, vz: Math.sin(a)*(kind==='finish'?3.5:2)});
   }
-  stageFX.push({ring,sparks, age:0, dur:kind === 'finish' ? 1.5 : .75});
+  if (kind === 'land') { ring.material.opacity = 0.6; ring.scale.setScalar(0.6); }
+  stageFX.push({ring,sparks, age:0, dur:kind === 'finish' ? 1.5 : kind === 'land' ? .45 : .75});
   if (stageFX.length > 16) clearStageFX(stageFX.shift());
 }
 function clearStageFX(fx) {
@@ -386,8 +396,22 @@ function physicsStep(dt) {
   }
   const playing = G.state === "play" || G.state === "menu";
   if (playing && now >= G.stunUntil) {
+    let hit = null;
     for (const b of C.spinners) {
-      if (G.pos.y < b.maxY + 0.1 && G.pos.y + PLAYER_H > b.minY && footOverlaps(b, G.pos.x, G.pos.z, PLAYER_R + 0.05)) { knock(b); break; }
+      if (G.pos.y < b.maxY + 0.1 && G.pos.y + PLAYER_H > b.minY && footOverlaps(b, G.pos.x, G.pos.z, PLAYER_R + 0.05)) { hit = b; break; }
+    }
+    if (!hit) for (const b of C.sweeps || []) {
+      if (G.pos.y < b.maxY - 0.02 && G.pos.y + PLAYER_H > b.minY && footOverlaps(b, G.pos.x, G.pos.z, PLAYER_R)) { hit = b; break; }
+    }
+    if (!hit) for (const p of C.pushers || []) {
+      const b = p.b;
+      if (G.pos.y < b.maxY - 0.05 && G.pos.y + PLAYER_H > b.minY && footOverlaps(b, G.pos.x, G.pos.z, PLAYER_R)) { hit = b; break; }
+    }
+    if (hit) knock(hit);
+    // 체크포인트 깃발에 닿으면 켜기
+    if (G.M && G.M.fx) for (const fl of G.M.fx.flags) {
+      if (fl.on) continue;
+      if (Math.abs(G.pos.y - fl.pos.y) < 2.2 && Math.hypot(G.pos.x - fl.pos.x, G.pos.z - fl.pos.z) < 1.7) activateFlag(fl);
     }
   }
   if (G.hop) { stepHop(dt); return; }
@@ -463,6 +487,7 @@ function onLanded() {
   if (G.pendingWrong && s.kind !== "option") G.pendingWrong = null;   // 무너지기 전에 광장으로 되돌아옴
   if (G.gateOpenFor && s !== G.gateOpenFor.strip) closeGatePanel();
   if (G.qFloor && !(s.kind === "plaza" && s.floor === G.qFloor) && s.kind !== "option") hideQPanel();
+  if (["pad", "strip", "plaza", "bouncy", "bounce"].includes(s.kind)) spawnStageFX("land", new THREE.Vector3(G.pos.x, s.maxY, G.pos.z), s.kind === "bouncy" ? 0xff8fc8 : 0xfff3b0);
   if (s.kind === "bouncy") {
     G.vel.y = BOUNCY_V; G.grounded = false; s.squash = now;
     Sound.play("boing");
@@ -487,15 +512,24 @@ function saveCheckpoint(s) {
   G.checkpoint = s;
   if (s.cp > G.maxCp) G.maxCp = s.cp;
   moveFlag();
-  spawnStageFX("checkpoint", new THREE.Vector3(s.cx, s.maxY, s.cz), 0x75faad);
   updateHud();
   if (newZone) {
     toast(`${s.zone + 1}구역 「${G.unit.zones[s.zone].name}」에 들어왔어요!`);
     Sound.play("zone");
     pushEvent("zone", `${s.zone + 1}구역 「${G.unit.zones[s.zone].name}」 도착`);
-  } else if (s.kind === "plaza") { showCpBadge(); Sound.play("checkpoint"); }
-  else Sound.play("checkpoint");
+  }
   publishProgress();
+}
+function activateFlag(fl) {
+  if (!G.flagsOn) G.flagsOn = new Set();
+  G.flagsOn.add(fl.zi);
+  setCheckpointFlag(G.M, fl.zi, true);
+  G.respawn = fl.s;
+  Sound.play("checkpoint");
+  spawnStageFX("checkpoint", fl.pos, 0xff4d4d);
+  showCpBadge();
+  toast("🚩 체크포인트! 떨어지면 여기서 다시 시작해요");
+  pushEvent("checkpoint", `${fl.zi}층 체크포인트 깃발`);
 }
 function wrongTarget(f) {
   const C = G.C, w = G.settings.wrongTo;
@@ -510,7 +544,8 @@ function fellOff() {
   } else {
     G.falls++;
     Sound.play("fall");
-    toast("앗! 떨어졌어요. 깃발에서 다시!");
+    G.checkpoint = G.respawn || G.C.plazas[0];   // 마지막으로 닿은 체크포인트 깃발에서 다시
+    toast(G.respawn && G.respawn !== G.C.plazas[0] ? "앗! 떨어졌어요. 🚩 체크포인트에서 다시!" : "앗! 떨어졌어요. 출발 지점에서 다시!");
   }
   placeAt(G.checkpoint);
   hideQPanel();
@@ -520,6 +555,7 @@ function fellOff() {
 function toFlag() {
   if (G.state !== "play") return;
   G.pendingWrong = null;
+  G.checkpoint = G.respawn || G.C.plazas[0];
   placeAt(G.checkpoint);
   hideQPanel();
   if (G.checkpoint.kind === "plaza" && G.checkpoint.floor > 0 && !G.solved[G.checkpoint.floor]) showQPanel(G.checkpoint.floor);
@@ -865,6 +901,14 @@ const obbyCameraLook = new THREE.Vector3();
 const obbyCameraPosition = new THREE.Vector3();
 let obbyCameraReady = false;
 let obbyCameraLookReady = false;
+// 다음에 뛸 발판 위에 빛나는 고리 (문제 광장의 정답 발판은 표시 안 함)
+function updateNextMark() {
+  const N = G.M && G.M.fx && G.M.fx.next; if (!N) return;
+  const nx = G.state === "play" ? camNextPad(1) : null;
+  const show = !!nx && nx.kind !== "option" && nx.active !== false && !G.gateOpenFor;
+  N.g.visible = show;
+  if (show) { N.g.position.set(nx.cx, nx.maxY + 0.05, nx.cz); const sc = Math.min(1.6, Math.max(0.8, Math.min(nx.hx, nx.hz) / 1.3)); N.ring.parent.scale.set(sc, 1, sc); }
+}
 // 카메라용: 지금 서 있는(또는 마지막) 발판 다음의 코스 발판
 let _camIdx = 0;
 function camNextPad(k = 1) {
@@ -1010,6 +1054,7 @@ function gameFrame(dt, t) {
   updateBlob(av);
   av.group.visible = G.state !== "title" && G.state !== "lobby";
   av.blob.visible = av.group.visible;
+  updateNextMark();
   animateWorld(C, G.M, t, dt);
   animateVisibleFriends(dt);
   animatePads();
@@ -1127,6 +1172,7 @@ async function joinRoom(code, name, grade, cls) {
   await me.update({ name, num, grade, cls, color: G.color, online: true, ready: false, say: null, joinedAt: Net.TS(), cp: 0, floor: 0, zone: 0, correct: 0, wrong: 0, gates: 0, falls: 0, finished: false, time: 0, q: null, t: Net.TS() });
   me.child("online").onDisconnect().set(false);
   G.room = { code, pid, name, num, grade, cls, ref: roomRef, me, joinT: Net.now() };
+  try { const sd = await roomRef.child("settings/seed").once("value"); G.seed = sd.val() || 0; } catch (e) {}
   setupWorld(unit);
   Rank.watch(unit.id);
   const on = (path, ev, fn) => { const r = roomRef.child(path); r.on(ev, fn); roomOffs.push(() => r.off(ev, fn)); };
@@ -1134,6 +1180,11 @@ async function joinRoom(code, name, grade, cls) {
     const v = s.val() || {};
     G.settings = { wrongTo: v.wrongTo || "course", gates: v.gates !== false, photos: v.photos !== false, order: v.order || "random" };
     applyMapStyle(v.map);
+    // 선생님이 새 판을 열면 장애물이 새로 섞임 (게임 중에는 바꾸지 않음)
+    if ((v.seed || 0) !== (G.seed || 0)) {
+      G.seed = v.seed || 0;
+      if (G.unit && !["play", "paused", "menu"].includes(G.state)) { setupWorld(G.unit); prepareRun(); }
+    }
     if (!G.settings.gates && G.C) G.C.gates.forEach((g, zi) => { if (g && !g.cleared) { g.cleared = true; g.wall.active = false; setGateOpen(G.M, zi, true); if (G.gateOpenFor === g) closeGatePanel(); } });
   });
   on("off", "value", (s) => { G.off = s.val() || {}; });
@@ -1428,7 +1479,7 @@ $("startBtn").addEventListener("click", async () => {
   try { localStorage.setItem("st-name", name); localStorage.setItem("st-grade", pick.grade); localStorage.setItem("st-cls", pick.cls); } catch (e) {}
   if (!Net.configured()) {
     // 공동 접속 서버(Firebase)가 아직 없으면: 혼자서 바로 게임
-    setupWorld(soloUnit || UNITS[0]);
+    G.seed = 1 + Math.floor(Math.random() * 1e9); setupWorld(soloUnit || UNITS[0]);
     prepareRun(); startRun();
     toast("지금은 혼자 도전 중이에요 · 선생님이 서버를 연결하면 친구들과 함께해요");
     return;
@@ -1463,7 +1514,7 @@ function initStudent() {
   const uParam = params.get("unit");
   soloUnit = UNITS.find((u) => u.id === uParam) || UNITS[0];
   titleTab = "room";
-  setupWorld(soloUnit);
+  G.seed = 1 + Math.floor(Math.random() * 1e9); setupWorld(soloUnit);
   prepareRun();
   renderTitle();
   showScreen("titleScreen");

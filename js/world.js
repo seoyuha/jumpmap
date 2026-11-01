@@ -133,12 +133,33 @@ function shade(hex, k) {
 // ===================================================================
 // 코스 만들기: 단원(unit)의 구역 수·장애물에 맞춰 나선형 탑을 쌓음
 // ===================================================================
-function buildCourse(unit) {
+// 37차: 무작위 장애물. 같은 시드면 같은 코스 (반 전체·TV가 같은 코스를 봄)
+function seededRandom(seed) { let a = (seed >>> 0) || 1; return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const OBSTACLE_POOLS = [
+  ["pad", "pad", "wind", "lift", "bouncy", "sweep"],
+  ["pad", "hurdle", "spinner", "wind", "crumble", "lift", "sweep", "pusher"],
+  ["pad", "crumble", "wind", "spinner", "mover", "sweep", "pusher", "lift"],
+  ["lift", "mover", "spinner", "pusher", "crumble", "sweep", "hurdle", "pad"],
+  ["mover", "cross", "crumble", "pusher", "sweep", "spinner", "lift"],
+  ["cross", "mover", "crumble", "pusher", "sweep", "spinner", "wind"],
+];
+function randomObstacles(rnd, zi) {
+  const pool = OBSTACLE_POOLS[Math.min(zi, OBSTACLE_POOLS.length - 1)], out = [];
+  while (out.length < 3) {
+    const k = pool[Math.floor(rnd() * pool.length)];
+    if (k !== "pad" && out.includes(k)) continue;
+    if (k === "bouncy" && out.includes("bouncy")) continue;
+    out.push(k);
+  }
+  return out;
+}
+function buildCourse(unit, seed) {
+  const rnd = seed ? seededRandom(seed) : null;
   const zones = unit.zones, FPZ = unit.floorsPerZone || 3, TOTAL = zones.length * FPZ;
   const C = {
     unit, zones, FPZ, TOTAL,
     solids: [], plazas: [], strips: [], landings: [], floors: [], gates: [], bounces: [],
-    movers: [], lifts: [], spinners: [], crumbles: [], winds: [], bouncies: [], walls: [],
+    movers: [], lifts: [], spinners: [], crumbles: [], winds: [], bouncies: [], walls: [], sweeps: [], pushers: [], seed: seed || 0,
     path: [], // TV 연습용 로봇이 따라가는 길 (발판 차례)
   };
   let ang = 0, top = 1, prevHalf = PLAZA / 2, rad = RINGS[0].r, dir = RINGS[0].dir;
@@ -159,7 +180,9 @@ function buildCourse(unit) {
     const zi = Math.floor((f - 1) / FPZ), zone = zones[zi];
     const pad = zi < 2 ? 3 : zi < 4 ? 2.7 : 2.5;
     let bonusRise = 0;
-    for (const kind of zone.obstacles || ["pad", "pad", "pad"]) {
+    const kinds = rnd ? randomObstacles(rnd, zi) : (zone.obstacles || ["pad", "pad", "pad"]);
+    const R = rnd || (() => 0.5);
+    for (const kind of kinds) {
       const base = { floor: f, zone: zi };
       if (kind === "hurdle") {
         const len = 5;
@@ -175,18 +198,44 @@ function buildCourse(unit) {
         const pt = rp(ang);
         const s = add(pt, top, size, size, zone.light, { kind: "pad", ...base });
         const arms = kind === "cross" ? [0, Math.PI / 2] : [0];
-        const speed = (1.15 + zi * 0.12) * (kind === "cross" ? 0.75 : 1) * (f % 2 ? 1 : -1);
+        const speed = (1.15 + zi * 0.12) * (kind === "cross" ? 0.75 : 1) * (rnd ? (R() < 0.5 ? 1 : -1) * (0.85 + R() * 0.3) : (f % 2 ? 1 : -1));
         for (const off of arms) {
           const bar = makeSolid(pt.x, pt.z, pt.theta + off, 3.9, 0.28, top + 0.9, { kind: "spinner", base: pt.theta + off, speed, pad: s, ...base }, 0.6);
           C.spinners.push(bar);
         }
         way(s); prevHalf = size / 2;
+      } else if (kind === "sweep") {
+        // 발목 높이로 도는 막대: 점프해서 넘어가요
+        const size = 7;
+        step(prevHalf + GAP + size / 2); top += RISE + bonusRise; bonusRise = 0;
+        const pt = rp(ang);
+        const s = add(pt, top, size, size, zone.light, { kind: "pad", ...base });
+        const speed = (0.7 + Math.min(zi, 5) * 0.06) * (R() < 0.5 ? 1 : -1), base0 = pt.theta + R() * Math.PI;
+        // 가운데(반지름 1m)는 안전한 쉼터: 막대는 바깥쪽 양팔만
+        const r0 = 1.0, r1 = size / 2 - 0.25;
+        for (const arm of [1, -1]) {
+          const bar = makeSolid(pt.x, pt.z, base0, (r1 - r0) / 2, 0.2, top + 0.42, { kind: "sweep", base: base0, speed, pad: s, arm, dist: (r0 + r1) / 2, ...base }, 0.37);
+          C.sweeps.push(bar);
+        }
+        way(s); prevHalf = size / 2;
+      } else if (kind === "pusher") {
+        // 양옆으로 왔다 갔다 하는 블록 두 개: 틈을 보고 지나가요
+        const w = 5.6, len = 4.2;
+        step(prevHalf + GAP + len / 2); top += RISE + bonusRise; bonusRise = 0;
+        const pt = rp(ang);
+        const s = add(pt, top, w, len, zone.color, { kind: "pad", ...base });
+        const period = 3.4 - Math.min(zi, 5) * 0.15, ph = R() * 6;
+        for (const [lz, off] of [[-0.95, 0], [0.95, Math.PI]]) {
+          const b = makeSolid(pt.x, pt.z, pt.theta, 0.6, 0.45, top + 1.15, { kind: "pusher", pad: s, ...base }, 1.15);
+          C.pushers.push({ b, pad: s, lz, reach: w / 2 - 0.75, phase: ph + off, period });
+        }
+        way(s); prevHalf = len / 2;
       } else if (kind === "wind") {
         const size = 7;
         step(prevHalf + GAP + size / 2); top += RISE + bonusRise; bonusRise = 0;
         const pt = rp(ang);
         const s = add(pt, top, size, 6, zone.light, { kind: "pad", ...base });
-        C.winds.push({ pad: s, side: f % 2 ? 1 : -1, phase: f * 1.3, period: 4.2, on: false, power: 3.4 + zi * 0.2 });
+        C.winds.push({ pad: s, side: rnd ? (R() < 0.5 ? 1 : -1) : f % 2 ? 1 : -1, phase: rnd ? R() * 4 : f * 1.3, period: 4.2, on: false, power: 3.4 + zi * 0.2 });
         way(s); prevHalf = 3;
       } else if (kind === "crumble") {
         step(prevHalf + GAP + pad / 2); top += RISE + bonusRise; bonusRise = 0;
@@ -278,6 +327,15 @@ function buildCourse(unit) {
 // 움직이는 발판·회전 막대·바람 상태를 시간 t에 맞춰 갱신
 function updateDynamics(C, t, dt) {
   for (const b of C.spinners) setTheta(b, b.base + b.speed * t);
+  for (const b of C.sweeps || []) {
+    setTheta(b, b.base + b.speed * t);
+    b.cx = b.pad.cx + b.c * b.dist * b.arm; b.cz = b.pad.cz - b.sn * b.dist * b.arm;
+  }
+  for (const p of C.pushers || []) {
+    const k = Math.sin((t / p.period) * Math.PI * 2 + p.phase) * p.reach;
+    const [x, z] = toWorld(p.pad, k, p.lz);
+    p.b.cx = x; p.b.cz = z; p.b.maxY = p.pad.maxY + 1.15; p.b.minY = p.pad.maxY;
+  }
   for (const m of C.movers) {
     const s = m.s, k = Math.sin((t / m.period) * Math.PI * 2 + m.phase) * m.reach;
     const nx = m.mid.x + Math.sin(m.mid.theta) * k, nz = m.mid.z + Math.cos(m.mid.theta) * k;
@@ -1352,8 +1410,9 @@ function buildWorldMeshesHD(scene, C) {
   // 화면 가까이서도 선명하게 보이는 가벼운 절차 생성형 발판 무늬.
   // 반복 사용 가능한 3종 텍스처만 만들어 태블릿의 텍스처 메모리 사용량을 제한한다.
   function makeTopDecal(kind){
-    const c=document.createElement("canvas");c.width=c.height=256;
-    const ctx=c.getContext("2d");ctx.clearRect(0,0,256,256);
+    const c=document.createElement("canvas");c.width=c.height=512;
+    const ctx=c.getContext("2d");ctx.clearRect(0,0,512,512);
+    ctx.scale(2,2);
     // 표면 질감은 캔버스에서 생성: 서버 요청 없이 선명한 재질을 공유한다.
     const N=256;
     if(kind==="wood"){
@@ -1367,6 +1426,9 @@ function buildWorldMeshesHD(scene, C) {
       for(let k=0;k<5;k++){let x=28+k*49,y=22+(k%3)*67;ctx.strokeStyle="rgba(85,45,23,.38)";ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(x,y,8,4,.2,0,Math.PI*2);ctx.stroke();}
     }else if(kind==="stone"){
       ctx.fillStyle="rgba(43,88,123,.08)";ctx.fillRect(0,0,N,N);
+      const stoneLight=ctx.createLinearGradient(0,0,256,256);
+      stoneLight.addColorStop(0,"rgba(255,255,255,.14)");stoneLight.addColorStop(1,"rgba(0,20,60,.14)");
+      ctx.fillStyle=stoneLight;ctx.fillRect(0,0,N,N);
       for(let y=0;y<8;y++)for(let x=0;x<8;x++){
         const xx=x*32+(y%2)*15,yy=y*32;
         ctx.strokeStyle="rgba(29,62,99,.30)";ctx.lineWidth=2;ctx.strokeRect(xx+2,yy+2,28,28);
@@ -1385,7 +1447,7 @@ function buildWorldMeshesHD(scene, C) {
       ctx.lineWidth=3;ctx.strokeStyle="rgba(255,255,255,.85)";ctx.stroke();
     }
     const t=new THREE.CanvasTexture(c);
-    t.anisotropy=4;
+    t.anisotropy=8; t.minFilter=THREE.LinearMipmapLinearFilter; t.magFilter=THREE.LinearFilter;
     return new THREE.MeshBasicMaterial({map:t,transparent:true,opacity:kind==="star"?.78:.53,depthWrite:false,side:THREE.DoubleSide});
   }
   const topDecals={star:makeTopDecal("star"),stone:makeTopDecal("stone"),wood:makeTopDecal("wood")};
@@ -1834,6 +1896,7 @@ function buildWorldMeshes(scene, C) {
   const style = MAP_STYLE === "stage" ? "stage" : "hd";
   const M = style === "stage" ? buildWorldMeshesStage(scene, C) : buildWorldMeshesHD(scene, C);
   M.style = style;
+  buildCourseFx(M, C);
   const U = scene.userData;
   if (style === "hd" && U && U.skyMat) {   // 고화질 맵: 늘 맑은 하늘
     U.skyMat.uniforms.top.value.set("#5aa8ec"); U.skyMat.uniforms.bottom.value.set("#d9f1ff");
@@ -1843,6 +1906,7 @@ function buildWorldMeshes(scene, C) {
   return M;
 }
 function animateWorld(C, M, t, dt) {
+  animateCourseFx(C, M, t, dt);
   if (M.style === "stage") animateWorldStage(C, M, t, dt);
   else { animateWorldHD(C, M, t, dt); const U = scene && scene.userData; if (U && U.sky) { U.sky.position.copy(camera.position); U.stars.position.copy(camera.position); } }
 }
@@ -2172,4 +2236,115 @@ function makeAvatarSheet3D(ai, name, opts = {}) {
     case "num10": { const n = box(0.4, 0.4, 0.02, new THREE.MeshLambertMaterial({ map: numTex("10", S.top, "#ffffff") })); at(n, 0, 1.28, 0.235); } break;
   }
   return blockFinish({ group, inner, legL, legR, armL, armR, head, styleIndex: ai }, name, opts);
+}
+
+
+// ===================================================================
+// 37차: 발판 효과 · 새 장애물 모양 · 체크포인트 깃발 (두 맵 공통으로 덧붙임)
+// ===================================================================
+function buildCourseFx(M, C) {
+  const root = new THREE.Group(); M.root.add(root);
+  const FX = (M.fx = { root, sweeps: [], pushers: [], pulses: [], arrows: [], flags: [], next: null });
+  const basic = (c, o = {}) => new THREE.MeshBasicMaterial({ color: c, ...o });
+  const phong = (c, o = {}) => new THREE.MeshPhongMaterial({ color: c, shininess: 80, ...o });
+  const glowMat = (c, op = 0.8) => basic(c, { transparent: true, opacity: op, depthWrite: false, side: THREE.DoubleSide });
+  // 낮은 회전 막대 (양팔) + 가운데 안전 원판
+  const sweepPads = new Set();
+  for (const b of C.sweeps || []) {
+    const g = new THREE.Group();
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, b.hx * 2, 14), new THREE.MeshPhongMaterial({ map: stripeTex("#ff4d4d", "#ffffff"), shininess: 90 }));
+    bar.rotation.z = Math.PI / 2; g.add(bar);
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 10), phong("#ffd43b")); cap.position.x = b.hx * b.arm; g.add(cap);
+    root.add(g); FX.sweeps.push({ b, g });
+    if (!sweepPads.has(b.pad)) {
+      sweepPads.add(b.pad);
+      const p = b.pad, hub = new THREE.Group();
+      const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.08, 28), phong("#8ce99a")); disc.position.y = 0.04; hub.add(disc);
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.3, 0.42, 14), phong("#3b5bdb")); post.position.y = 0.25; hub.add(post);
+      const ring = new THREE.Mesh(new THREE.RingGeometry(b.dist + b.hx - 0.1, b.dist + b.hx + 0.12, 48), glowMat("#ff8787", 0.35)); ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03; hub.add(ring);
+      hub.position.set(p.cx, p.maxY, p.cz); root.add(hub);
+      FX.sweepHubs = FX.sweepHubs || []; FX.sweepHubs.push({ hub, b });
+    }
+  }
+  // 미는 블록
+  for (const p of C.pushers || []) {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(roundedBoxGeo(1.2, 1.15, 0.9, 0.16), new THREE.MeshPhongMaterial({ map: stripeTex("#ffd43b", "#2b2d42"), shininess: 60 }));
+    body.position.y = 0.575; g.add(body);
+    const face = new THREE.Mesh(roundedBoxGeo(0.7, 0.4, 0.95, 0.1), phong("#ff6b6b")); face.position.y = 0.75; g.add(face);
+    root.add(g); FX.pushers.push({ p, g });
+    // 다니는 길 표시
+    const track = new THREE.Mesh(new THREE.PlaneGeometry(p.reach * 2 + 1.2, 0.18), glowMat("#ffe066", 0.55));
+    track.rotation.x = -Math.PI / 2; const [tx, tz] = toWorld(p.pad, 0, p.lz); track.position.set(tx, p.pad.maxY + 0.03, tz); track.rotation.z = p.pad.theta; root.add(track);
+  }
+  // 움직이는 발판: 민트색 레일 + 화살표 (패키지 33차), 오르내리는 발판: 위아래 화살표, 통통 발판: 퍼지는 고리
+  const moveMat = basic(0x7bfff0, { transparent: true, opacity: 0.85, depthWrite: false });
+  for (const m of C.movers) {
+    const g = M.solidMesh.get(m.s); if (!g) continue;
+    for (const side of [-1, 1]) { const rail = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), moveMat); rail.scale.set(m.s.hx * 1.45, 0.035, 0.065); rail.position.set(0, 0.125, side * m.s.hz * 0.65); g.add(rail); }
+    for (const dz of [-1, 1]) { const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.4, 3), moveMat); arrow.rotation.x = Math.PI / 2; arrow.rotation.z = dz > 0 ? 0 : Math.PI; arrow.position.set(0, 0.16, dz * 0.55); g.add(arrow); FX.arrows.push({ m: arrow, base: 0.16, ph: dz }); }
+  }
+  for (const l of C.lifts) {
+    const g = M.solidMesh.get(l.s); if (!g) continue;
+    for (const k of [0, 1]) { const ar = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.32, 4), glowMat("#9cf6ff", 0.9)); ar.position.set(l.s.hx * 0.62, 0.35 + k * 0.32, l.s.hz * 0.62); g.add(ar); FX.arrows.push({ m: ar, base: 0.35 + k * 0.32, ph: k * 1.2, up: true }); }
+  }
+  for (const b of C.bouncies) {
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.75, 0.95, 32), glowMat("#ff8fc8", 0.7)); ring.rotation.x = -Math.PI / 2;
+    ring.position.set(b.cx, b.maxY + 0.06, b.cz); root.add(ring); FX.pulses.push({ m: ring, ph: b.cx });
+  }
+  // 다음에 뛸 발판 표시 (빛나는 고리 + 내려가는 화살표) — 게임이 위치를 정함
+  {
+    const g = new THREE.Group();
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.15, 40), glowMat("#fff3a0", 0.85)); ring.rotation.x = -Math.PI / 2; g.add(ring);
+    const ring2 = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.62, 32), glowMat("#ffffff", 0.7)); ring2.rotation.x = -Math.PI / 2; g.add(ring2);
+    const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.5, 4), glowMat("#ffd43b", 0.95)); arrow.rotation.x = Math.PI; arrow.position.y = 1.4; g.add(arrow);
+    g.visible = false; root.add(g); FX.next = { g, ring, ring2, arrow };
+  }
+  // 체크포인트 깃발: 5층마다 (5·10·15·20·25층 문제를 풀고 내려서는 착지대) — 노란색, 닿으면 빨간색
+  for (let f = 5; f < C.TOTAL; f += 5) {
+    const s = C.strips[f]; if (!s) continue;
+    const zi = f;   // 깃발 번호 = 층
+    const g = new THREE.Group();
+    const [x, z] = toWorld(s, 0, s.hz * 0.35);   // 착지대 한가운데, 다음 발판 쪽 (누구나 지나가는 길목)
+    g.position.set(x, s.maxY, z); g.rotation.y = s.theta;
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, 0.18, 20), phong("#ffffff")); base.position.y = 0.09; g.add(base);
+    const halo = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.05, 36), glowMat("#ffe066", 0.75)); halo.rotation.x = -Math.PI / 2; halo.position.y = 0.05; g.add(halo);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 2.6, 10), phong("#f1f3f5", { shininess: 120 })); pole.position.y = 1.3; g.add(pole);
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 10), phong("#ffd43b", { shininess: 120 })); ball.position.y = 2.65; g.add(ball);
+    const clothGeo = new THREE.PlaneGeometry(1.2, 0.8, 8, 2); clothGeo.translate(0.6, 0, 0);
+    const clothMat = new THREE.MeshPhongMaterial({ color: "#ffd43b", side: THREE.DoubleSide, shininess: 40, emissive: "#3a2a00" });
+    const cloth = new THREE.Mesh(clothGeo, clothMat); cloth.position.set(0.05, 2.15, 0); g.add(cloth);
+    const label = textSprite("체크포인트", { size: 40, bg: "rgba(255,193,7,.95)", color: "#5a3a00", pad: 12, border: "#ffffff" }, 0.42); label.position.y = 3.1; g.add(label);
+    M.root.add(g);
+    FX.flags.push({ s, zi, g, cloth, clothMat, halo, ball, label, on: false, pos: new THREE.Vector3(x, s.maxY, z), base0: clothGeo.attributes.position.array.slice() });
+  }
+}
+function setCheckpointFlag(M, zi, on) {
+  const f = M && M.fx && M.fx.flags.find((q) => q.zi === zi); if (!f) return;
+  f.on = on;
+  f.clothMat.color.set(on ? "#ff3b3b" : "#ffd43b"); f.clothMat.emissive.set(on ? "#4a0000" : "#3a2a00");
+  f.halo.material.color.set(on ? "#ff6b6b" : "#ffe066"); f.ball.material.color.set(on ? "#ff3b3b" : "#ffd43b");
+  setSpriteText(f.label, on ? "여기서 다시 시작!" : "체크포인트", { size: 40, bg: on ? "rgba(229,56,59,.95)" : "rgba(255,193,7,.95)", color: on ? "#ffffff" : "#5a3a00", pad: 12, border: "#ffffff" }, 0.42);
+}
+function animateCourseFx(C, M, t, dt) {
+  const FX = M.fx; if (!FX) return;
+  for (const { b, g } of FX.sweeps) { g.position.set(b.cx, b.maxY - 0.2, b.cz); g.rotation.y = b.theta; }
+  for (const { hub, b } of FX.sweepHubs || []) hub.children[1].rotation.y = b.theta;
+  for (const { p, g } of FX.pushers) { g.position.set(p.b.cx, p.pad.maxY, p.b.cz); g.rotation.y = p.pad.theta; }
+  for (const a of FX.arrows) {
+    if (a.up) { const k = ((t * 0.9 + a.ph) % 1); a.m.position.y = a.base + k * 0.35; a.m.material.opacity = 0.9 * (1 - k); }
+    else a.m.position.y = a.base + Math.sin(t * 4 + a.ph) * 0.04;
+  }
+  for (const p of FX.pulses) { const k = (t * 0.8 + p.ph * 0.1) % 1; p.m.scale.setScalar(0.8 + k * 0.9); p.m.material.opacity = 0.75 * (1 - k); }
+  for (const f of FX.flags) {
+    const arr = f.cloth.geometry.attributes.position.array, b0 = f.base0;
+    for (let i = 0; i < arr.length; i += 3) { const x = b0[i]; arr[i + 2] = Math.sin(t * 6 + x * 4) * 0.12 * (x / 1.2); }
+    f.cloth.geometry.attributes.position.needsUpdate = true;
+    f.halo.scale.setScalar(1 + Math.sin(t * 3 + f.zi) * 0.06);
+    f.label.visible = true;
+  }
+  if (FX.next && FX.next.g.visible) {
+    FX.next.ring.scale.setScalar(1 + Math.sin(t * 4) * 0.08); FX.next.ring2.rotation.z = t * 1.5;
+    FX.next.arrow.position.y = 1.35 + Math.sin(t * 4) * 0.18; FX.next.arrow.rotation.y = t * 2;
+  }
 }

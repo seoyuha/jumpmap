@@ -32,7 +32,7 @@ async function ensureEasyRoom() {
     await Net.room(code).set({
       meta: { unit: T.unit.id, createdAt: Net.TS() },
       state: { status: "lobby", t: Net.TS() },
-      settings: { wrongTo: "course", gates: true, photos: true }
+      settings: { wrongTo: "course", gates: true, photos: true, seed: newSeed() }
     });
   }
   openTeacherRoom(code);
@@ -155,6 +155,8 @@ function scheduleRender(full) {
   renderQueued = true;
   setTimeout(() => { renderQueued = false; renderLive(); }, 600);
 }
+// 37차: 장애물 배치 시드 (새 판·게임 시작마다 새로 섞음)
+const newSeed = () => 1 + Math.floor(Math.random() * 1e9);
 function setState(status) { T.room.child("state").set({ status, t: Net.TS() }); }
 function setSetting(k, v) { T.room.child("settings/" + k).set(v); }
 function sendCmd(pid, type) { T.room.child("cmd/" + pid).set({ type, t: Net.TS() }); }
@@ -224,6 +226,7 @@ function renderTeacherShell() {
           <label class="twTg"><input type="checkbox" id="tGates" ${S.gates !== false ? "checked" : ""}><span>🚪 구역 끝 관문</span><i></i></label>
           <label class="twTg"><input type="checkbox" id="tPhotos" ${S.photos !== false ? "checked" : ""}><span>🖼 문제 사진</span><i></i></label>
         </div>
+        <div class="twBar" style="margin-top:8px"><button class="tBtn sm" id="tShuffle" ${st === "play" || st === "paused" ? "disabled" : ""}>🎲 장애물 새로 섞기</button><span class="twNote">게임을 시작할 때마다 장애물 배치가 바뀌어요 (반 전체·TV가 같은 코스)</span></div>
       </section>
     </div>
 
@@ -266,7 +269,12 @@ function renderTeacherShell() {
   </div>`;
   tEl().scrollTop = scroll;
   const bind = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
-  bind("tStart", () => { if (st === "ended") { $("tLobby").click(); return; } T.playStart = T.playStart || Date.now(); setState("play"); });
+  bind("tStart", async () => {
+    if (st === "ended") { $("tLobby").click(); return; }
+    if (st === "lobby") await T.room.child("settings/seed").set(newSeed());   // 대기실에서 시작할 때마다 장애물 새로 섞기
+    T.playStart = T.playStart || Date.now(); setState("play");
+  });
+  bind("tShuffle", () => { if (st === "play" || st === "paused") { alert("게임 중에는 바꿀 수 없어요. 새 판에서 섞여요."); return; } setSetting("seed", newSeed()); });
   bind("tPause", () => setState("paused"));
   bind("tEnd", () => { if (confirm("게임을 끝낼까요? 학생 화면에 결과가 나와요.")) setState("ended"); });
   document.querySelectorAll("#tMapSeg button").forEach((b) => (b.onclick = () => setSetting("map", b.dataset.m)));
@@ -282,6 +290,7 @@ function renderTeacherShell() {
     T.events = []; T.playStart = 0;
     for (const pid of Object.keys(T.players)) upd[`players/${pid}/ready`] = false;
     await T.room.update(upd);
+    await T.room.child("settings/seed").set(newSeed());
     await T.room.child("state").set({ status: "lobby", t: Net.TS() });
   });
   bind("tTv", () => window.open(tvUrl(T.code), "science-tower-tv"));

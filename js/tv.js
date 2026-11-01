@@ -25,6 +25,7 @@ async function startTV(code) {
   addEventListener("mousemove", () => { document.body.style.cursor = ""; clearTimeout(TV.curT); TV.curT = setTimeout(() => (document.body.style.cursor = "none"), 2500); });
   buildTvHud();
   if (TV.demo) {
+    TV.seed = 1 + Math.floor(Math.random() * 1e9);
     setupTvWorld(UNITS.find((u) => u.id === new URLSearchParams(location.search).get("unit")) || UNITS[0]);
     startDemo();
     return;
@@ -34,6 +35,8 @@ async function startTV(code) {
   TV.room = Net.room(code);
   const meta = await Net.roomExists(code);
   if (!meta) { $("tvWait").innerHTML = `<div><h2>방 ${esc(code)}이(가) 없어요</h2><p>교사 화면에서 「TV 중계 화면 열기」를 눌러 주세요.</p></div>`; setupTvWorld(UNITS[0]); return; }
+  // 반의 장애물 배치(시드)가 바뀌면 TV 코스도 같이
+  TV.room.child("settings/seed").on("value", (s) => { const sd = s.val() || 0; if (sd !== (TV.seed || 0)) { TV.seed = sd; if (TV.unit) setupTvWorld(TV.unit); } });
   TV.room.child("settings/map").on("value", (s) => { const st = s.val() === "stage" ? "stage" : "hd"; if (st !== MAP_STYLE || (TV.M && TV.M.style !== st)) { MAP_STYLE = st; if (TV.unit) setupTvWorld(TV.unit); } });
   TV.room.child("meta/unit").on("value", (s) => { const u = UNITS.find((x) => x.id === s.val()) || UNITS[0]; if (u !== TV.unit) setupTvWorld(u); });
   TV.room.child("state").on("value", (s) => { const v = (s.val() || {}).status; onTvState(["lobby", "play", "paused", "ended"].includes(v) ? v : "lobby"); });
@@ -47,7 +50,7 @@ async function startTV(code) {
 function setupTvWorld(unit) {
   if (TV.M) scene.remove(TV.M.root);
   TV.unit = unit;
-  TV.C = buildCourse(unit);
+  TV.C = buildCourse(unit, TV.seed || 0);
   TV.M = buildWorldMeshes(scene, TV.C);
   scene.remove(TV.M.flag);
   // TV 화면에서는 관문 막을 반투명하게 열어 둠(학생마다 다름)
