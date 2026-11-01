@@ -867,7 +867,7 @@ let obbyCameraReady = false;
 let obbyCameraLookReady = false;
 // 카메라용: 지금 서 있는(또는 마지막) 발판 다음의 코스 발판
 let _camIdx = 0;
-function camNextPad() {
+function camNextPad(k = 1) {
   const P = G.C && G.C.path; if (!P || !P.length) return null;
   const cur = G.grounded && G.ground ? G.ground : null;
   if (cur) {
@@ -876,9 +876,10 @@ function camNextPad() {
     else i = P.findIndex((w) => w.s === cur);
     if (i >= 0) _camIdx = i;
   }
-  const n = P[Math.min(P.length - 1, _camIdx + 1)];
-  // 문제 광장: 다음은 가운데 정답 발판 → 그다음 착지대까지 보이게
-  if (n && n.option && G.solved[n.floor]) return P[Math.min(P.length - 1, _camIdx + 2)].s;
+  let j = _camIdx + k;
+  // 이미 푼 층의 정답 발판은 건너뛰고 그다음 착지대를 봄
+  if (P[j] && P[j].option && G.solved[P[j].floor]) j++;
+  const n = P[Math.min(P.length - 1, j)];
   return n ? n.s : null;
 }
 function updateCamera(dt) {
@@ -903,7 +904,14 @@ function updateCamera(dt) {
     G.yaw = angleLerp(G.yaw, G.facing, k);
     G.camDist += (6.5 - G.camDist) * k;
   }
-  const tx = G.pos.x, ty = G.pos.y + 1.6, tz = G.pos.z;
+  // (36차) 점프해도 카메라가 같이 튀지 않게: "발 딛는 높이"를 부드럽게 따라가고,
+  //   공중에서는 높이의 25%만 따라감. 떨어질 때(발판보다 아래)는 바로 따라감.
+  if (G.grounded || G.camGroundY === undefined) G.camGroundY = G.camGroundY === undefined ? G.pos.y : G.camGroundY + (G.pos.y - G.camGroundY) * (1 - Math.exp(-dt * 6));
+  const above = G.pos.y - G.camGroundY;
+  const followY = G.grounded ? G.pos.y : above >= 0 ? G.camGroundY + above * 0.25 : G.pos.y + 0.5;
+  G.camY = G.camY === undefined || G.camSnap ? followY : G.camY + (followY - G.camY) * (1 - Math.exp(-dt * (above < -1 ? 10 : 5)));
+  if (!G.grounded && above < -1.5) G.camGroundY = Math.min(G.camGroundY, G.pos.y + 1.5);
+  const tx = G.pos.x, ty = G.camY + 1.6, tz = G.pos.z;
   // (33차) 코스 카메라: "다음 발판" 쪽을 향하도록 카메라를 플레이어 뒤·바깥쪽에 두고,
   //   시선은 플레이어와 다음 발판 사이를 봐서 다음 발판이 화면에 잘 보이게 한다.
   const nxt = camNextPad();
@@ -913,11 +921,17 @@ function updateCamera(dt) {
   if (fl < 0.8) { fx = -Math.sin(G.yaw); fz = -Math.cos(G.yaw); fl = 1; }
   fx /= fl; fz /= fl;
   const pr = Math.hypot(tx, tz) || 1, ox = tx / pr, oz = tz / pr;           // 타워 바깥 방향
+  // 다음다음 발판 방향을 섞어서 지그재그 발판에서도 좌우로 덜 흔들리게
+  const nn = camNextPad(2);
+  if (nn && nn !== nxt) { let gx = nn.cx - tx, gz = nn.cz - tz; const gl = Math.hypot(gx, gz) || 1; fx = fx * 0.55 + (gx / gl) * 0.45; fz = fz * 0.55 + (gz / gl) * 0.45; const l2 = Math.hypot(fx, fz) || 1; fx /= l2; fz /= l2; }
   const dx = -fx * 0.86 + ox * 0.5, dz = -fz * 0.86 + oz * 0.5;           // 뒤 + 바깥쪽
-  const wantYaw = Math.atan2(dx, dz);
+  const rawYaw = Math.atan2(dx, dz);
+  if (G.camWant === undefined || G.camSnap) G.camWant = rawYaw;
+  else if (Math.abs(Math.atan2(Math.sin(rawYaw - G.camWant), Math.cos(rawYaw - G.camWant))) > 0.12) G.camWant = angleLerp(G.camWant, rawYaw, 1 - Math.exp(-dt * 2.5));   // 7° 안쪽 작은 흔들림은 무시
+  const wantYaw = G.camWant;
   const manual = now - G.lastManualCam < 3.0;
   if (!manual && (G.state === "play" || G.state === "menu")) {
-    G.yaw = angleLerp(G.yaw, wantYaw, 1 - Math.exp(-dt * (G.camSnap ? 20 : 1.8)));
+    G.yaw = angleLerp(G.yaw, wantYaw, G.camSnap ? 1 : 1 - Math.exp(-dt * 1.6));
     G.camSnap = false;
   }
   const camDistance = Math.max(6, Math.min(16, G.camDist || 9.5));
@@ -926,7 +940,7 @@ function updateCamera(dt) {
     ty + Math.sin(pitch) * camDistance, tz + Math.cos(G.yaw) * Math.cos(pitch) * camDistance);
   // 시선: 다음 발판 쪽으로 30% (최대 4.5m), 높이는 다음 발판 높이를 살짝 반영
   const look = nxt ? Math.min(4.5, fl * 0.3) : 0;
-  obbyCameraTarget.set(tx + fx * look, ty + 0.4 + (nxt ? Math.max(-0.6, Math.min(1.4, (nxt.maxY - G.pos.y) * 0.35)) : 0), tz + fz * look);
+  obbyCameraTarget.set(tx + fx * look, ty + 0.4 + (nxt ? Math.max(-0.6, Math.min(1.4, (nxt.maxY - G.camY) * 0.35)) : 0), tz + fz * look);
   // 가운데 타워 벽 안으로 카메라가 들어가지 않게만 밀어냄
   const camR = Math.hypot(obbyCameraPosition.x, obbyCameraPosition.z);
   if (camR < 10) { const k = 10 / Math.max(0.1, camR); obbyCameraPosition.x *= k; obbyCameraPosition.z *= k; }
@@ -943,6 +957,7 @@ function updateCamera(dt) {
   obbyCameraLook.lerp(obbyCameraTarget, 1 - Math.exp(-Math.max(0, dt) * 9));
   if (G.cameraShake && now < G.cameraShake) { camera.position.x += (Math.random() - 0.5) * 0.3; camera.position.y += (Math.random() - 0.5) * 0.3; }
   camera.lookAt(obbyCameraLook);
+  G.camSnap = false;
 }
 
 // ---------------- 매 프레임 ----------------

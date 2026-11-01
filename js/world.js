@@ -1913,24 +1913,45 @@ function animateAvatarSprite(av, dt, hs, grounded, extra = {}) {
   const k = Math.min(1, dt * 12);
   const g = av.group.position, facing = av.group.rotation.y;
   // 카메라 쪽을 보게 세우고, 보는 방향에 따라 앞·옆·뒤 그림 고르기
+  //  (36차) 경계에서 그림이 깜빡이지 않게: 여유 각도(히스테리시스) + 0.18초 이상 같은 쪽일 때만 바꿈
   const camYaw = camera ? Math.atan2(camera.position.x - g.x, camera.position.z - g.z) : facing;
   const rel = _wrapA(camYaw - facing), ar = Math.abs(rel);
-  if (ar < 0.85) setCharFrame(av, extra.cheer || hs < 0.08 || !grounded ? 0 : 3, false);
-  else if (ar > 2.3) setCharFrame(av, 2, false);
-  else setCharFrame(av, 1, rel < 0);
+  const H = 0.22;
+  let view = av.view || "back";
+  if (view === "front") { if (ar > 0.85 + H) view = "side"; }
+  else if (view === "back") { if (ar < 2.3 - H) view = "side"; }
+  else { if (ar < 0.85 - H) view = "front"; else if (ar > 2.3 + H) view = "back"; }
+  const side = view === "side" ? (rel < 0) : false;
+  if (view !== av.wantView || side !== av.wantSide) { av.wantView = view; av.wantSide = side; av.viewT = 0; }
+  av.viewT = (av.viewT || 0) + dt;
+  if (av.view === undefined || av.viewT > 0.18) { av.view = av.wantView; av.side = av.wantSide; }
+  // 앞모습: 걷는 중이면 "서 있기" 그림, 멈추거나 공중·응원이면 "동작 포즈" (0.25초 넘게 이어질 때만 바꿈)
+  const posey = !!extra.cheer || hs < 0.08 || !grounded;
+  if (posey !== av.wantPose) { av.wantPose = posey; av.poseT = 0; }
+  av.poseT = (av.poseT || 0) + dt;
+  if (av.pose === undefined || av.poseT > 0.35) av.pose = av.wantPose;
+  if (av.view === "front") setCharFrame(av, av.pose ? 0 : 3, false);
+  else if (av.view === "back") setCharFrame(av, 2, false);
+  else setCharFrame(av, 1, av.side);
   av.inner.rotation.y = camYaw - facing;
-  // 걷기: 통통 튀고 살짝 기우뚱 / 점프: 늘어남 / 응원: 깡충
+  // 걷기: 통통 튀고 살짝 기우뚱 / 점프: 웅크렸다 늘어남 / 착지: 꾹 눌림 / 응원: 깡충
   if (grounded) av.walk += dt * (hs > 0.05 ? 9 + hs * 5 : 2);
+  if (av.wasGrounded && !grounded) av.takeoff = 0.12;
+  if (av.wasGrounded === false && grounded) av.landFX = 0.16;
+  av.wasGrounded = grounded;
+  av.takeoff = Math.max(0, (av.takeoff || 0) - dt); av.landFX = Math.max(0, (av.landFX || 0) - dt);
   let bob = 0, lean = 0, sy = 1, sx = 1;
-  if (grounded && hs > 0.08) { bob = Math.abs(Math.sin(av.walk)) * 0.14 * hs; lean = Math.sin(av.walk) * 0.07 * hs; sy = 1 - Math.abs(Math.cos(av.walk)) * 0.04 * hs; }
+  if (grounded && hs > 0.08) { bob = Math.abs(Math.sin(av.walk)) * 0.12 * hs; lean = Math.sin(av.walk) * 0.06 * hs; sy = 1 - Math.abs(Math.cos(av.walk)) * 0.035 * hs; }
   else if (grounded) { sy = 1 + Math.sin(av.walk * 1.5) * 0.012; }
-  else { sy = 1.06; sx = 0.95; }
+  else { const vy = extra.verticalSpeed; sy = vy === undefined ? 1.05 : vy > 2 ? 1.09 : vy < -4 ? 1.03 : 1.05; sx = 2 - sy; }
+  if (av.takeoff > 0) { const t = av.takeoff / 0.12; sy = 1.12 - 0.04 * t; sx = 0.9; }
+  if (av.landFX > 0) { const t = Math.sin((av.landFX / 0.16) * Math.PI); sy = 1 - 0.16 * t; sx = 1 + 0.12 * t; bob = 0; }
   if (extra.cheer) { bob = Math.abs(Math.sin(extra.cheer * 7)) * 0.45; sy = 1 + Math.sin(extra.cheer * 14) * 0.04; }
   if (extra.tilt) lean += extra.tilt * 0.6;
-  const m = av.mesh;
+  const m = av.mesh, kk = av.landFX > 0 || av.takeoff > 0 ? Math.min(1, dt * 30) : k;
   m.position.y += (bob - m.position.y) * k;
   m.rotation.z += (lean - m.rotation.z) * k;
-  m.scale.y += (sy - m.scale.y) * k; m.scale.x += (sx - m.scale.x) * k;
+  m.scale.y += (sy - m.scale.y) * kk; m.scale.x += (sx - m.scale.x) * kk;
 }
 
 
