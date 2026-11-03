@@ -21,8 +21,9 @@ async function startTeacher() {
   if (!Net.configured()) { renderSetupGuide(); return; }
   tEl().innerHTML = `<div class="tWrap"><div class="empty">연결하는 중…</div></div>`;
   const ok = await Net.init();
-  if (!ok) { tEl().innerHTML = `<div class="tWrap"><div class="tCard"><h2>연결할 수 없어요</h2><p class="tNote">인터넷 연결과 firebase-config.js 설정을 확인해 주세요.</p></div></div>`; return; }
-  await ensureEasyRoom();
+  const fail = (why) => { tEl().innerHTML = `<div class="tWrap"><div class="tCard"><h2>연결할 수 없어요</h2><p class="tNote">${esc(why)}</p><p class="tNote">Firebase 콘솔 → Realtime Database → 규칙(Rules)의 "rules" 안에 다음 줄을 넣고 게시해 주세요:<br><code>"jumpmap": { ".read": true, ".write": true }</code></p><button class="tBtn primary" onclick="location.reload()">다시 연결</button></div></div>`; };
+  if (!ok) { fail(Net.explain(Net.detail)); return; }
+  try { await ensureEasyRoom(); } catch (e) { fail(Net.explain(e)); }
 }
 
 // 학생은 별도 코드를 쓰지 않고 이 학교의 기본 교실(0000)에 입장합니다.

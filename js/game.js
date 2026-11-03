@@ -1154,8 +1154,10 @@ function animateVisibleFriends(dt) {
 async function joinRoom(code, name, grade, cls) {
   const num = `${cls}반`;
   const ok = await Net.init();
-  if (!ok) throw new Error(Net.error === "not-configured" ? "공동 플레이 연결이 아직 설정되지 않았어요. 선생님께 알려주세요." : "인터넷 연결을 확인해 주세요.");
-  let meta = await Net.roomExists(code);
+  if (!ok) throw new Error(Net.error === "not-configured" ? "공동 플레이 연결이 아직 설정되지 않았어요. 선생님께 알려주세요." : Net.explain(Net.detail));
+  let meta;
+  try { meta = await Promise.race([Net.roomExists(code), new Promise((_, rej) => setTimeout(() => rej(new Error("응답 없음 (15초)")), 15000))]); }
+  catch (e) { throw new Error(Net.explain(e)); }
   if (!meta) {
     // 선생님이 화면을 열지 않았어도 첫 학생이 교실(0000)을 열고 바로 시작 (단원은 2단원)
     meta = { unit: UNITS[0].id, createdAt: Net.TS() };
@@ -1489,7 +1491,7 @@ $("startBtn").addEventListener("click", async () => {
   try {
     await joinRoom(code, name, pick.grade, pick.cls);
   } catch (e) {
-    $("titleErr").textContent = e.message;
+    $("titleErr").textContent = /permission/i.test(String(e && (e.code || e.message))) ? Net.explain(e) : e.message;
   } finally { btn.disabled = false; renderTitle(); }
 });
 $("howBtn").addEventListener("click", () => showScreen("howScreen"));

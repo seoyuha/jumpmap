@@ -21,31 +21,44 @@ const Net = {
     const c = window.FIREBASE_CONFIG;
     return !!(c && c.apiKey && c.databaseURL && !/x{4}|여기/.test(c.apiKey + c.databaseURL));
   },
-  loadScript(src) {
+  loadScript(src, ms = 12000) {
     return new Promise((res, rej) => {
       const s = document.createElement("script");
-      s.src = src; s.onload = res; s.onerror = () => rej(new Error("load " + src));
+      const t = setTimeout(() => rej(new Error("시간 초과 " + src)), ms);
+      s.src = src; s.onload = () => { clearTimeout(t); res(); }; s.onerror = () => { clearTimeout(t); rej(new Error("불러오기 실패 " + src)); };
       document.head.appendChild(s);
     });
   },
-  async init() {
-    if (this.enabled) return true;
-    if (!this.configured()) { this.error = "not-configured"; return false; }
+  // 38차: 여러 곳에서 동시에 불러도 연결은 딱 한 번 (동시에 두 번 불러 서로 꼬이던 문제 수정)
+  init() {
+    if (this.enabled) return Promise.resolve(true);
+    if (!this.configured()) { this.error = "not-configured"; return Promise.resolve(false); }
+    if (!this._p) this._p = this._init().then((ok) => { if (!ok) this._p = null; return ok; });   // 실패하면 다음에 다시 시도
+    return this._p;
+  },
+  async _init() {
     try {
-      if (!window.firebase) {
-        await this.loadScript(`https://www.gstatic.com/firebasejs/${SDK_VER}/firebase-app-compat.js`);
-        await this.loadScript(`https://www.gstatic.com/firebasejs/${SDK_VER}/firebase-database-compat.js`);
+      if (!(window.firebase && firebase.database)) {
+        if (!window.firebase) await this.loadScript(`https://www.gstatic.com/firebasejs/${SDK_VER}/firebase-app-compat.js`);
+        if (!firebase.database) await this.loadScript(`https://www.gstatic.com/firebasejs/${SDK_VER}/firebase-database-compat.js`);
       }
       if (!firebase.apps.length) firebase.initializeApp(window.FIREBASE_CONFIG);
       this.db = firebase.database();
       this.db.ref(".info/serverTimeOffset").on("value", (s) => { this.offset = s.val() || 0; });
-      this.enabled = true;
+      this.enabled = true; this.error = ""; this.detail = "";
       return true;
     } catch (e) {
       console.warn(e);
-      this.error = "offline";
+      this.error = "offline"; this.detail = String(e && e.message || e);
       return false;
     }
+  },
+  // 연결 실패 이유를 알기 쉽게
+  explain(e) {
+    const m = String((e && (e.code || e.message)) || e || "");
+    if (/permission|PERMISSION_DENIED/i.test(m)) return "Firebase 규칙에서 이 게임 폴더(jumpmap)를 아직 허용하지 않았어요. 선생님께 알려 주세요. (규칙에 \"jumpmap\": { \".read\": true, \".write\": true } 추가)";
+    if (/불러오기 실패|시간 초과/.test(m)) return "게임 서버 파일(gstatic.com)을 불러오지 못했어요. 와이파이 연결 또는 학교 인터넷 차단을 확인해 주세요.";
+    return "연결하지 못했어요: " + m.slice(0, 120);
   },
   now() { return Date.now() + this.offset; },
   // 다른 게임과 같은 Firebase를 써도 섞이지 않게 이 게임 폴더(FIREBASE_ROOT) 아래에만 저장
