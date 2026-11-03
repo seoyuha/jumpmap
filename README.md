@@ -289,3 +289,6 @@ lib/three.min.js      three.js r159 (MIT 라이선스, lib/three-LICENSE.txt)
 - 첫 화면에서 여러 곳이 동시에 Firebase 연결을 시작하면서 연결 파일을 여러 번(6번) 불러와 꼬일 수 있던 문제 수정: 연결은 한 번만, 실패하면 다음에 다시 시도.
 - 우노 게임과 같은 방식으로 Firebase 파일을 페이지에서 미리 불러옴.
 - 연결이 안 될 때 이유를 구체적으로 보여 줌: 규칙에서 jumpmap 폴더 허용 안 됨 / 학교 인터넷이 gstatic.com 차단 / 15초 응답 없음. 교사 화면에는 규칙에 넣을 줄과 「다시 연결」 버튼.
+
+## 39차 변경: 전용 Firebase
+- 과학 점프맵 전용 Firebase 프로젝트 `science-jumpmap` 새로 만듦 (Realtime Database, 싱가포르 asia-southeast1). 규칙은 `jumpmap` 폴더만 읽기·쓰기 허용. 우노 게임 Firebase와 분리.
