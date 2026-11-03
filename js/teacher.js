@@ -13,11 +13,41 @@ const WRONG_TO = [["floor", "그 층 광장"], ["course", "그 층 처음"], ["z
 const joinUrl = (code) => `${location.origin}${location.pathname}?room=${code}`;
 const tvUrl = (code) => `${location.origin}${location.pathname}?tv=${code}`;
 
+// 39차: 교사 화면 비밀번호 (비밀번호 자체는 저장하지 않고 해시값만 비교)
+const TEACHER_PIN_HASH = "a80be138d7ed7d40d0d050a7e058b3448836f82df69c753d0e07e3f555e3d0f9";
+async function pinHash(pw) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("jumpmap:" + pw));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function teacherUnlocked() { try { return localStorage.getItem("jm-tpin") === TEACHER_PIN_HASH || sessionStorage.getItem("jm-tpin") === TEACHER_PIN_HASH; } catch (e) { return false; } }
+function renderPinGate() {
+  tEl().innerHTML = `
+  <div class="tWrap"><div class="tCard tPin">
+    <h2>🔒 교사 화면</h2>
+    <p class="tNote">선생님 비밀번호를 입력해 주세요.</p>
+    <form id="tPinForm" autocomplete="off">
+      <input class="tField" id="tPinInput" type="password" placeholder="비밀번호" autofocus style="font-size:18px;max-width:260px">
+      <label class="tNote" style="display:block;margin:10px 0"><input type="checkbox" id="tPinKeep" checked> 이 기기에서 기억하기</label>
+      <button class="tBtn primary" type="submit">들어가기</button>
+      <p class="tNote" id="tPinErr" style="color:#e5383b;min-height:1.4em"></p>
+    </form>
+    <p class="tNote"><a href="./">← 학생 첫 화면으로</a></p>
+  </div></div>`;
+  const inp = $("tPinInput"); setTimeout(() => inp.focus(), 50);
+  $("tPinForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const h = await pinHash(inp.value);
+    if (h !== TEACHER_PIN_HASH) { $("tPinErr").textContent = "비밀번호가 맞지 않아요."; inp.select(); return; }
+    try { ($("tPinKeep").checked ? localStorage : sessionStorage).setItem("jm-tpin", h); } catch (er) {}
+    startTeacher();
+  };
+}
 async function startTeacher() {
   document.body.style.touchAction = "auto";
   tEl().classList.remove("hidden");
   $("titleScreen").classList.add("hidden");
   $("game").classList.add("hidden");
+  if (!teacherUnlocked()) { renderPinGate(); return; }
   if (!Net.configured()) { renderSetupGuide(); return; }
   tEl().innerHTML = `<div class="tWrap"><div class="empty">연결하는 중…</div></div>`;
   const ok = await Net.init();
@@ -182,7 +212,7 @@ function renderTeacherShell() {
         <a href="#tRankGrBox"><img src="${UI("tb_nav_grank")}" alt="학년 랭킹"></a>
         <a href="#twUnit"><img src="${UI("tb_nav_set")}" alt="설정"></a>
       </nav>
-      <div class="twState"><img src="${UI(STATE_BADGE[st][0])}" alt="${STATE_BADGE[st][1]}"><button class="twTv imgTb" id="tTv" title="TV 중계 화면 열기"><img src="${UI("tb_p_preview")}" alt="미리보기 (TV 중계)"></button></div>
+      <div class="twState"><img src="${UI(STATE_BADGE[st][0])}" alt="${STATE_BADGE[st][1]}"><button class="tBtn sm" id="tLock" title="이 기기에서 비밀번호 기억 지우기" style="margin-right:6px">🔒 잠그기</button><button class="twTv imgTb" id="tTv" title="TV 중계 화면 열기"><img src="${UI("tb_p_preview")}" alt="미리보기 (TV 중계)"></button></div>
     </header>
 
     <div class="twGrid3">
@@ -294,6 +324,7 @@ function renderTeacherShell() {
     await T.room.child("settings/seed").set(newSeed());
     await T.room.child("state").set({ status: "lobby", t: Net.TS() });
   });
+  bind("tLock", () => { try { localStorage.removeItem("jm-tpin"); sessionStorage.removeItem("jm-tpin"); } catch (e) {} location.reload(); });
   bind("tTv", () => window.open(tvUrl(T.code), "science-tower-tv"));
   document.querySelectorAll("#tUnitSeg button").forEach((b) => (b.onclick = () => {
     if (b.dataset.u === u.id) return;

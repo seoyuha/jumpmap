@@ -292,3 +292,4 @@ lib/three.min.js      three.js r159 (MIT 라이선스, lib/three-LICENSE.txt)
 
 ## 39차 변경: 전용 Firebase
 - 과학 점프맵 전용 Firebase 프로젝트 `science-jumpmap` 새로 만듦 (Realtime Database, 싱가포르 asia-southeast1). 규칙은 `jumpmap` 폴더만 읽기·쓰기 허용. 우노 게임 Firebase와 분리.
+- 교사 화면 비밀번호 잠금: 들어갈 때 비밀번호 확인(코드에는 비밀번호 대신 해시값만 저장). 「이 기기에서 기억하기」를 켜면 다음부터 바로 열림, 교사 화면 위 「🔒 잠그기」로 기억 지우기.
